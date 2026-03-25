@@ -1,9 +1,11 @@
-import { SPRAY_RANGE } from '../../shared/constants.js';
+import { getConeTiles } from '../../shared/sprayCone.js';
 
 export class SprayEffect {
   constructor(scene) {
     this.scene = scene;
     this._emitters = new Map(); // playerId → particles emitter
+    this._lastPredictAt = 0;
+    this._predictedKeys = new Set();
   }
 
   getOrCreate(playerId, color) {
@@ -38,8 +40,34 @@ export class SprayEffect {
     }
   }
 
+  predictLocalPaint(x, y, aimAngle, spraying, ownerIndex, ink) {
+    if (!spraying || !ownerIndex || ink <= 0) return;
+    const territory = this.scene.territory;
+    if (!territory) return;
+
+    const now = this.scene.time?.now ?? Date.now();
+    if (now - this._lastPredictAt < 50) return;
+    this._lastPredictAt = now;
+
+    if (this._predictedKeys.size > 4000) this._predictedKeys.clear();
+
+    const tiles = getConeTiles(x, y, aimAngle, undefined, undefined, territory.mapW, territory.mapH);
+    const changedTiles = [];
+    for (const t of tiles) {
+      const key = t.x * 1000 + t.y;
+      if (this._predictedKeys.has(key)) continue;
+      this._predictedKeys.add(key);
+      changedTiles.push({ x: t.x, y: t.y, owner: ownerIndex });
+    }
+
+    territory.applyDelta(changedTiles);
+  }
+
   remove(playerId) {
     const e = this._emitters.get(playerId);
-    if (e) { e.destroy(); this._emitters.delete(playerId); }
+    if (e) {
+      e.destroy();
+      this._emitters.delete(playerId);
+    }
   }
 }

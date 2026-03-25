@@ -23,6 +23,8 @@ export class GameScene extends Phaser.Scene {
     this.checkpointSprites = new Map();
     this.playerData = new Map();
     this.tileSize = TILE_SIZE;
+    this.colorIndexByHex = {};
+    this.localInk = 100;
 
     this.network = new NetworkManager(this);
     this.spray = new SprayEffect(this);
@@ -46,7 +48,10 @@ export class GameScene extends Phaser.Scene {
     // Build color lookup: colorIndex → hex
     const colorMap = {};
     colorMap[0] = '#1a1a2e'; // neutral
-    PLAYER_COLORS.forEach((c, i) => { colorMap[i + 1] = c; });
+    PLAYER_COLORS.forEach((c, i) => {
+      colorMap[i + 1] = c;
+      this.colorIndexByHex[c] = i + 1;
+    });
 
     this.territory = new TerritoryMap(this, mapW, mapH, colorMap);
 
@@ -71,6 +76,9 @@ export class GameScene extends Phaser.Scene {
     this.territory?.applyDelta(changedTiles);
     this.timerText.setText(`⏱ ${timeLeft}s`);
 
+    const top5 = [...players].sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, 5);
+    this.events.emit('score_update', top5);
+
     for (const p of players) {
       this.playerData.set(p.id, p);
       const sprites = this.playerSprites.get(p.id);
@@ -88,6 +96,8 @@ export class GameScene extends Phaser.Scene {
       // Camera follow own player
       if (p.id === this.playerId) {
         this.cameras.main.centerOn(sprites.circle.x, sprites.circle.y);
+        this.localInk = p.ink;
+        this.events.emit('ink_update', p.ink);
       }
     }
   }
@@ -132,6 +142,20 @@ export class GameScene extends Phaser.Scene {
     if (!this.playerId || !this.moveStick) return;
     const input = readJoysticks(this.moveStick, this.aimStick);
     this.network.sendInput(input);
+
+    const local = this.playerData.get(this.playerId);
+    const ownerIndex = this.colorIndexByHex[local?.color] || 1;
+    const sprites = this.playerSprites.get(this.playerId);
+    if (sprites) {
+      this.spray.predictLocalPaint(
+        sprites.circle.x,
+        sprites.circle.y,
+        input.aimAngle,
+        input.spraying,
+        ownerIndex,
+        local?.ink ?? this.localInk ?? 100
+      );
+    }
   }
 
   // ─── Helpers ───────────────────────────────────────────────────────────────
