@@ -85,6 +85,10 @@ export class GameScene extends Phaser.Scene {
     this._ensureCharacterTextures();
 
     players.forEach(p => this._createPlayerSprite(p));
+
+    const myPlayer = players.find(pp => pp.id === playerId);
+    if (myPlayer?.color) this.events.emit('self_color', { color: myPlayer.color });
+
     checkpoints.forEach(c => this._createCheckpointSprite(c));
 
     // Joysticks (fixed to camera)
@@ -94,8 +98,7 @@ export class GameScene extends Phaser.Scene {
 
     this.timerText.setText(`⏱ ${timeLeft}s`);
 
-    const me = players.find(pp => pp.id === playerId);
-    if (me?.color) this.events.emit('self_color', { color: me.color });
+
   }
 
   onDelta({ players, changedTiles, timeLeft, countdown }) {
