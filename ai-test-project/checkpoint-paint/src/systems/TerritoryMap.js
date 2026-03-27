@@ -47,10 +47,23 @@ export class TerritoryMap {
       const g = this.scene.make.graphics({ add: false });
       const base = parseInt(hex.replace('#', ''), 16);
 
-      g.fillStyle(base, 1);
-      g.fillRect(0, 0, TILE_SIZE, TILE_SIZE);
+      if (idx === 0) {
+        // Neutral tile: dark grid look
+        g.fillStyle(0x0d0d1a, 1);
+        g.fillRect(0, 0, TILE_SIZE, TILE_SIZE);
+        g.lineStyle(1, 0x1e1e2e, 0.8);
+        g.beginPath();
+        g.moveTo(0, 0);
+        g.lineTo(TILE_SIZE, 0);
+        g.moveTo(0, 0);
+        g.lineTo(0, TILE_SIZE);
+        g.strokePath();
+      } else {
+        g.fillStyle(base, 1);
+        g.fillRect(0, 0, TILE_SIZE, TILE_SIZE);
+      }
 
-      // Shine triangle (skip for "neutral" 0, keep subtle elsewhere)
+      // Shine triangle (skip for neutral)
       if (idx !== 0) {
         g.fillStyle(0xffffff, idx === 255 ? 0.18 : 0.35);
         g.fillTriangle(0, 0, TILE_SIZE, 0, 0, TILE_SIZE);
