@@ -41,6 +41,7 @@ export class GameScene extends Phaser.Scene {
     this.timerText = this.add.text(this.scale.width / 2, 20, '', {
       fontSize: '20px', color: '#ffffff', stroke: '#000', strokeThickness: 3
     }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(20);
+    this.timerText.setVisible(false);
 
     this.msgText = this.add.text(this.scale.width / 2, this.scale.height * 0.4, '', {
       fontSize: '28px', color: '#ffff00', stroke: '#000', strokeThickness: 4
@@ -88,6 +89,9 @@ export class GameScene extends Phaser.Scene {
     this.aimStick = aimStick;
 
     this.timerText.setText(`⏱ ${timeLeft}s`);
+
+    const me = players.find(pp => pp.id === playerId);
+    if (me?.color) this.events.emit('self_color', { color: me.color });
   }
 
   onDelta({ players, changedTiles, timeLeft, countdown }) {

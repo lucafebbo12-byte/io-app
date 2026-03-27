@@ -2,165 +2,236 @@ import Phaser from 'phaser';
 import { INK_MAX } from '../../shared/constants.js';
 
 export class HUDScene extends Phaser.Scene {
-  constructor() { super({ key: 'HUDScene' }); }
+  constructor() {
+    super({ key: 'HUDScene' });
+  }
 
   create() {
     const W = this.scale.width;
     const H = this.scale.height;
 
-    // Ink bar background
-    this.add.rectangle(W / 2, H - 28, 220, 22, 0x000000, 0.55).setOrigin(0.5).setScrollFactor(0).setDepth(15);
-    this.add.rectangle(W / 2, H - 28, 210, 14, 0x222222).setOrigin(0.5).setScrollFactor(0).setDepth(15);
-    this.inkBar = this.add.rectangle(W / 2 - 105, H - 28, 210, 14, 0x00aaff).setOrigin(0, 0.5).setScrollFactor(0).setDepth(16);
-    this.inkLabel = this.add.text(W / 2, H - 46, 'INK  100', {
-      fontSize: '11px', color: '#ccccff', stroke: '#000', strokeThickness: 2
-    }).setOrigin(0.5).setScrollFactor(0).setDepth(16);
-
-    // Zone indicator text below ink bar
-    this.zoneText = this.add.text(W / 2, H - 10, '● NEUTRAL', {
-      fontSize: '11px', color: '#aaaaaa', stroke: '#000', strokeThickness: 2, fontStyle: 'bold'
-    }).setOrigin(0.5).setScrollFactor(0).setDepth(16);
-
     this.inkLevel = INK_MAX;
-    this.playerColor = 0x00aaff;
+    this.inkVisual = INK_MAX;
+    this.timeLeft = 0;
     this.zoneType = 'neutral';
-    this.timeLeft = 999;
+    this.selfColorInt = 0x00aaff;
+    this.selfColorHex = '#00aaff';
 
-    const gameScene = this.scene.get('GameScene');
+    // --- Timer (top-center)
+    this.timerText = this.add
+      .text(W / 2, 14, '', {
+        fontSize: '32px',
+        color: '#ffffff',
+        stroke: '#000',
+        strokeThickness: 6
+      })
+      .setOrigin(0.5, 0)
+      .setScrollFactor(0)
+      .setDepth(50);
 
-    gameScene.events.on('ink_update', (ink) => { this.inkLevel = ink; });
+    // --- Scoreboard (top-right)
+    this.scoreRows = [];
+    const scoreX = W - 12;
+    const scoreY = 70;
+    for (let i = 0; i < 5; i++) {
+      const rowY = scoreY + i * 20;
+      const dot = this.add
+        .circle(scoreX - 130, rowY + 8, 5, 0xffffff)
+        .setOrigin(0.5)
+        .setScrollFactor(0)
+        .setDepth(50);
 
-    gameScene.events.on('zone_update', (zone) => {
-      this.zoneType = zone;
-      if (zone === 'own') {
-        this.zoneText.setText('⚡ OWN ZONE  +SPEED +INK').setColor('#00ff88');
-      } else if (zone === 'enemy') {
-        this.zoneText.setText('⚠ ENEMY ZONE  SLOW').setColor('#ff4444');
-      } else {
-        this.zoneText.setText('● NEUTRAL').setColor('#aaaaaa');
-      }
-    });
+      const text = this.add
+        .text(scoreX, rowY, '', {
+          fontSize: '14px',
+          color: '#ffffff',
+          stroke: '#000',
+          strokeThickness: 4,
+          align: 'right'
+        })
+        .setOrigin(1, 0)
+        .setScrollFactor(0)
+        .setDepth(50);
 
-    // Sync player color from GameScene after init
-    gameScene.events.on('ink_update', (ink) => {
-      this.inkLevel = ink;
-      // Try to get player color from GameScene
-      const gs = this.scene.get('GameScene');
-      if (gs && gs.playerId && gs.playerData) {
-        const pd = gs.playerData.get(gs.playerId);
-        if (pd && pd.color) {
-          this.playerColor = parseInt(pd.color.replace('#', ''), 16);
-        }
-      }
-    });
-
-    // Score panel background
-    this.scoreBg = this.add.rectangle(W - 5, 5, 130, 100, 0x000000, 0.45)
-      .setOrigin(1, 0).setScrollFactor(0).setDepth(15);
-
-    this.scores = [];
-    this.scoreText = this.add.text(W - 10, 10, '', {
-      fontSize: '12px',
-      color: '#ffffff',
-      stroke: '#000',
-      strokeThickness: 2,
-      align: 'right',
-      lineSpacing: 2
-    }).setOrigin(1, 0).setScrollFactor(0).setDepth(16);
-
-    // Colored dots next to score entries
-    this._scoreDots = [];
-    for (let i = 0; i < 6; i++) {
-      const dot = this.add.circle(W - 122, 26 + i * 16, 4, 0xffffff)
-        .setScrollFactor(0).setDepth(17).setAlpha(0);
-      this._scoreDots.push(dot);
+      this.scoreRows.push({ dot, text });
     }
 
-    gameScene.events.on('score_update', (scores) => {
-      this.scores = scores || [];
-      this._renderScores();
+    // --- Ink "spray can" bar (bottom-center)
+    this.inkLabel = this.add
+      .text(W / 2, H - 64, 'INK', { fontSize: '12px', color: '#ffffff' })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(50);
+
+    this.zoneText = this.add
+      .text(W / 2, H - 18, 'NEUTRAL', { fontSize: '12px', color: '#ffffff' })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(50);
+
+    this.inkGfx = this.add.graphics().setScrollFactor(0).setDepth(50);
+
+    // --- Kill feed (top-left)
+    this.feed = [];
+    this.feedMax = 5;
+
+    // Events from GameScene
+    const game = this.scene.get('GameScene');
+    game.events.on('ink_update', (ink) => {
+      this.inkLevel = ink ?? this.inkLevel;
+    });
+    game.events.on('score_update', (scores) => this._renderScores(scores || []));
+    game.events.on('time_update', (t) => {
+      this.timeLeft = t ?? this.timeLeft;
+      this.timerText.setText(`${this.timeLeft}s`);
+    });
+    game.events.on('zone_update', (z) => {
+      this.zoneType = z || 'neutral';
+      this._renderZone();
+    });
+    game.events.on('kill_feed', ({ victimId }) => {
+      const name = this._formatName(victimId);
+      this._addFeed(`${name} ☠️`, '#ffffff');
+    });
+    game.events.on('checkpoint_feed', ({ playerId }) => {
+      const name = this._formatName(playerId);
+      this._addFeed(`🏳️ ${name} base destroyed!`, '#ff4444');
+    });
+    game.events.on('self_color', ({ color }) => {
+      if (!color) return;
+      this.selfColorHex = color;
+      this.selfColorInt = parseInt(color.replace('#', ''), 16);
     });
 
-    gameScene.events.on('time_update', (t) => { this.timeLeft = t; });
-
-    // Kill feed: top-left, last 3 kills
-    this._killFeedEntries = [];
-    this.killFeedTexts = [];
-    for (let i = 0; i < 3; i++) {
-      const t = this.add.text(10, 10 + i * 18, '', {
-        fontSize: '11px', color: '#ff4444', stroke: '#000', strokeThickness: 2
-      }).setScrollFactor(0).setDepth(16).setAlpha(0);
-      this.killFeedTexts.push(t);
-    }
-
-    gameScene.events.on('kill_feed', ({ victimId }) => {
-      this._addKillFeed(`${(victimId || '').slice(0, 6)} eliminated`);
-    });
-
-    gameScene.events.on('checkpoint_feed', ({ playerId }) => {
-      this._addKillFeed(`${(playerId || '').slice(0, 6)} checkpoint down`);
-    });
-  }
-
-  _addKillFeed(msg) {
-    this._killFeedEntries.unshift(msg);
-    if (this._killFeedEntries.length > 3) this._killFeedEntries.length = 3;
-    for (let i = 0; i < 3; i++) {
-      const t = this.killFeedTexts[i];
-      const entry = this._killFeedEntries[i];
-      if (entry) {
-        t.setText(entry).setAlpha(1);
-        this.tweens.killTweensOf(t);
-        this.tweens.add({ targets: t, alpha: 0, delay: 2500, duration: 400 });
-      } else {
-        t.setAlpha(0);
-      }
-    }
+    this._renderZone();
   }
 
   update() {
-    const pct = this.inkLevel / INK_MAX;
-    this.inkBar.setDisplaySize(210 * pct, 14);
-    // Use player color for bar, fallback to red when low
-    if (pct <= 0.3) {
-      this.inkBar.setFillStyle(0xff4444);
-    } else {
-      this.inkBar.setFillStyle(this.playerColor);
-    }
-    if (this.inkLabel) {
-      this.inkLabel.setText(`INK  ${Math.ceil(this.inkLevel)}`);
-      this.inkLabel.setColor(pct <= 0.3 ? '#ff8888' : '#ccccff');
+    // Smooth ink bar
+    this.inkVisual = Phaser.Math.Linear(this.inkVisual, this.inkLevel, 0.2);
+    this._renderInkBar();
+    this._renderTimerPulse();
+  }
+
+  _renderInkBar() {
+    const W = this.scale.width;
+    const H = this.scale.height;
+
+    const canW = 230;
+    const canH = 18;
+    const x = W / 2 - canW / 2;
+    const y = H - 46;
+
+    const pad = 3;
+    const innerW = canW - pad * 2;
+    const pct = Phaser.Math.Clamp(this.inkVisual / INK_MAX, 0, 1);
+    const fillW = Math.max(0, innerW * pct);
+
+    this.inkGfx.clear();
+
+    // Can background
+    this.inkGfx.fillStyle(0x0b0b12, 0.7);
+    this.inkGfx.fillRoundedRect(x, y, canW, canH, 8);
+
+    // Fill
+    this.inkGfx.fillStyle(this.selfColorInt, 1);
+    this.inkGfx.fillRoundedRect(x + pad, y + pad, fillW, canH - pad * 2, 6);
+
+    // Outline (glow when full)
+    const isFull = pct >= 0.999;
+    if (isFull) {
+      this.inkGfx.lineStyle(4, this.selfColorInt, 0.45);
+      this.inkGfx.strokeRoundedRect(x - 1, y - 1, canW + 2, canH + 2, 9);
     }
 
-    // Timer pulse red when < 30s — update GameScene timer text color
-    const gs = this.scene.get('GameScene');
-    if (gs && gs.timerText) {
-      gs.timerText.setColor(this.timeLeft < 30 ? '#ff4444' : '#ffffff');
+    this.inkGfx.lineStyle(2, 0xffffff, 0.55);
+    this.inkGfx.strokeRoundedRect(x, y, canW, canH, 8);
+
+    // Top cap
+    this.inkGfx.fillStyle(0xffffff, 0.2);
+    this.inkGfx.fillRoundedRect(W / 2 - 26, y - 9, 52, 8, 4);
+  }
+
+  _renderTimerPulse() {
+    if (!this.timerText) return;
+    if (this.timeLeft > 0 && this.timeLeft < 30) {
+      const t = this.time.now * 0.01;
+      const s = 1 + Math.sin(t) * 0.06;
+      this.timerText.setColor('#ff4444');
+      this.timerText.setScale(s);
+    } else {
+      this.timerText.setColor('#ffffff');
+      this.timerText.setScale(1);
     }
   }
 
-  _renderScores() {
-    if (!this.scoreText) return;
-    const lines = ['TOP 5'];
-    const count = Math.min(5, this.scores.length);
-    for (let i = 0; i < count; i++) {
-      const s = this.scores[i];
-      const name = (s.id || '').slice(0, 6);
-      const pct = Math.floor((s.score || 0) / (240 * 240) * 100);
-      lines.push(`${i + 1}. ${name}  ${pct}%`);
-
-      // Update dot color
-      if (this._scoreDots[i] && s.color) {
-        const c = parseInt(s.color.replace('#', ''), 16);
-        this._scoreDots[i].setFillStyle(c).setAlpha(1);
+  _renderScores(scores) {
+    const top = scores.slice(0, 5);
+    for (let i = 0; i < 5; i++) {
+      const row = this.scoreRows[i];
+      const s = top[i];
+      if (!s) {
+        row.text.setText('');
+        row.dot.setVisible(false);
+        continue;
       }
+      row.dot.setVisible(true);
+      const c = parseInt(String(s.color || '#ffffff').replace('#', ''), 16);
+      row.dot.setFillStyle(c, 1);
+      row.text.setText(`${i + 1}. ${this._formatName(s.id)}  ${Math.floor(s.score || 0)}`);
     }
-    // Hide unused dots
-    for (let i = count; i < this._scoreDots.length; i++) {
-      this._scoreDots[i].setAlpha(0);
+  }
+
+  _renderZone() {
+    if (!this.zoneText) return;
+    if (this.zoneType === 'own') {
+      this.zoneText.setText('OWN ZONE ⚡').setColor('#ffffff');
+    } else if (this.zoneType === 'enemy') {
+      this.zoneText.setText('ENEMY ZONE ⚠️').setColor('#ff6666');
+    } else {
+      this.zoneText.setText('NEUTRAL').setColor('#ffffff');
     }
-    const textH = 14 + count * 16;
-    this.scoreBg?.setSize(130, textH + 10);
-    this.scoreText.setText(lines.join('\n'));
+  }
+
+  _addFeed(text, color) {
+    const x = 12;
+    const y = 60;
+    const lineH = 18;
+
+    // Shift existing lines down
+    for (const item of this.feed) item.text.y += lineH;
+
+    const t = this.add
+      .text(x, y, text, { fontSize: '14px', color, stroke: '#000', strokeThickness: 4 })
+      .setOrigin(0, 0)
+      .setScrollFactor(0)
+      .setDepth(50);
+
+    this.feed.unshift({ text: t });
+    while (this.feed.length > this.feedMax) {
+      this.feed.pop().text.destroy();
+    }
+
+    this.tweens.add({
+      targets: t,
+      alpha: 0,
+      duration: 250,
+      delay: 1750,
+      onComplete: () => {
+        const idx = this.feed.findIndex(f => f.text === t);
+        if (idx >= 0) this.feed.splice(idx, 1);
+        t.destroy();
+      }
+    });
+  }
+
+  _formatName(id) {
+    if (!id) return '???';
+    const s = String(id);
+    if (s.startsWith('bot_')) {
+      const n = s.slice(4);
+      return `BOT_${n}`;
+    }
+    return s.slice(0, 6);
   }
 }

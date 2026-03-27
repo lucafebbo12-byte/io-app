@@ -103,6 +103,17 @@ export class GameRoom {
     this._tick++;
 
     if (this.countdown > 0) this.countdown--;
+    if (this.countdown > 0) {
+      if (this._tick % BROADCAST_EVERY === 0) {
+        this.io.emit('delta', {
+          players: this._serializePlayers(),
+          changedTiles: [],
+          timeLeft: this.timeLeft,
+          countdown: Math.ceil(this.countdown / TICK_RATE)
+        });
+      }
+      return;
+    }
 
     const allPlayers = [...this.players.values()];
     const changedTiles = [];
