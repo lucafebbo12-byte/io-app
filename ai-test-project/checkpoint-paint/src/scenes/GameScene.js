@@ -236,6 +236,7 @@ export class GameScene extends Phaser.Scene {
     const ownerIndex = this.colorIndexByHex[local?.color] || 1;
     const sprites = this.playerSprites.get(this.playerId);
     if (sprites) {
+      this.territory?.setAnimOrigin(sprites.container.x, sprites.container.y);
       this.spray.predictLocalPaint(
         sprites.container.x,
         sprites.container.y,

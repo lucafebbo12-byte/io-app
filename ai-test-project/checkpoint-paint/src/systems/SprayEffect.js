@@ -72,15 +72,15 @@ export class SprayEffect {
     if (this._predictedKeys.size > 4000) this._predictedKeys.clear();
 
     const tiles = getConeTiles(x, y, aimAngle, undefined, undefined, territory.mapW, territory.mapH);
-    const changedTiles = [];
+    const predictedTiles = [];
     for (const t of tiles) {
       const key = t.x * 1000 + t.y;
       if (this._predictedKeys.has(key)) continue;
       this._predictedKeys.add(key);
-      changedTiles.push({ x: t.x, y: t.y, owner: ownerIndex });
+      predictedTiles.push({ x: t.x, y: t.y });
     }
 
-    territory.applyDelta(changedTiles);
+    territory.applyPredictedTiles(predictedTiles, ownerIndex);
   }
 
   remove(playerId) {
