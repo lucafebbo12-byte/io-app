@@ -11,32 +11,52 @@ export class SprayEffect {
   getOrCreate(playerId, color) {
     if (this._emitters.has(playerId)) return this._emitters.get(playerId);
 
-    const particles = this.scene.add.particles(0, 0, 'dot', {
-      speed: { min: 80, max: 200 },
-      scale: { start: 0.6, end: 0 },
-      lifespan: { min: 200, max: 400 },
-      quantity: 3,
-      tint: parseInt(color.replace('#', ''), 16),
+    const tint = parseInt(color.replace('#', ''), 16);
+    // Main spray stream: medium blobs flying in aim direction
+    const stream = this.scene.add.particles(0, 0, 'dot', {
+      speed: { min: 120, max: 260 },
+      scale: { start: 1.0, end: 0 },
+      lifespan: { min: 250, max: 480 },
+      quantity: 4,
+      tint,
       emitting: false,
-      depth: 3
+      depth: 4,
+      alpha: { start: 0.9, end: 0 }
+    });
+    // Drip splatter: tiny drops that fall shorter range
+    const drips = this.scene.add.particles(0, 0, 'dot', {
+      speed: { min: 30, max: 70 },
+      scale: { start: 0.4, end: 0 },
+      lifespan: { min: 150, max: 300 },
+      quantity: 2,
+      tint,
+      emitting: false,
+      depth: 3,
+      alpha: { start: 0.7, end: 0 }
     });
 
-    this._emitters.set(playerId, particles);
-    return particles;
+    this._emitters.set(playerId, { stream, drips });
+    return this._emitters.get(playerId);
   }
 
   update(playerId, x, y, aimAngle, spraying, color) {
     const emitter = this.getOrCreate(playerId, color);
+    const { stream, drips } = emitter;
     if (spraying) {
-      emitter.setPosition(x, y);
-      emitter.setAngle({
-        min: Phaser.Math.RadToDeg(aimAngle) - 12,
-        max: Phaser.Math.RadToDeg(aimAngle) + 12
-      });
-      emitter.emitting = true;
-      emitter.explode(3);
+      const deg = Phaser.Math.RadToDeg(aimAngle);
+      const spread = 14;
+      stream.setPosition(x, y);
+      stream.setAngle({ min: deg - spread, max: deg + spread });
+      stream.emitting = true;
+      stream.explode(4);
+
+      drips.setPosition(x, y);
+      drips.setAngle({ min: deg - spread * 2, max: deg + spread * 2 });
+      drips.emitting = true;
+      drips.explode(2);
     } else {
-      emitter.emitting = false;
+      stream.emitting = false;
+      drips.emitting = false;
     }
   }
 
@@ -66,7 +86,8 @@ export class SprayEffect {
   remove(playerId) {
     const e = this._emitters.get(playerId);
     if (e) {
-      e.destroy();
+      e.stream?.destroy();
+      e.drips?.destroy();
       this._emitters.delete(playerId);
     }
   }

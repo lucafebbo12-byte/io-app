@@ -26,7 +26,7 @@ export class GameScene extends Phaser.Scene {
 
   create() {
     this.playerId = null;
-    this.playerSprites = new Map(); // id → {body, label, baseY}
+    this.playerSprites = new Map(); // id → {body, glow, label, baseY}
     this.checkpointSprites = new Map();
     this.playerData = new Map();
     this.tileSize = TILE_SIZE;
@@ -120,18 +120,31 @@ export class GameScene extends Phaser.Scene {
       sprites.body.x = Phaser.Math.Linear(sprites.body.x, p.x, 0.3);
       sprites.body.y = Phaser.Math.Linear(sprites.body.y, p.y, 0.3);
       sprites.baseY = sprites.body.y;
+      if (sprites.glow) {
+        sprites.glow.x = sprites.body.x;
+        sprites.glow.y = sprites.body.y;
+      }
       sprites.label.setPosition(sprites.body.x, sprites.body.y - 22);
       sprites.body.setAlpha(p.alive ? 1 : 0.2);
+      if (sprites.glow) sprites.glow.setAlpha(p.alive ? 0.55 : 0);
 
-      // Zone tint for own player
-      if (p.id === this.playerId) {
-        if (p.zoneType === 'enemy') {
-          sprites.body.setTint(0xff8888);
-        } else {
-          sprites.body.clearTint();
-        }
-        this.events.emit('zone_update', p.zoneType);
+      // Zone visual feedback (tint + subtle size change)
+      const zoneType = p.zoneType || 'neutral';
+      if (zoneType === 'own') {
+        sprites.body.clearTint();
+        sprites.body.setScale(1.1);
+        if (sprites.glow) sprites.glow.setVisible(true).setScale(1.25);
+      } else if (zoneType === 'enemy') {
+        sprites.body.setTint(0xff6666);
+        sprites.body.setScale(0.9);
+        if (sprites.glow) sprites.glow.setVisible(false);
+      } else {
+        sprites.body.clearTint();
+        sprites.body.setScale(1.0);
+        if (sprites.glow) sprites.glow.setVisible(false);
       }
+
+      if (p.id === this.playerId) this.events.emit('zone_update', zoneType);
 
       // Spray FX
       this.spray.update(p.id, sprites.body.x, sprites.body.y, p.aimAngle, p.spraying && p.alive, p.color);
@@ -213,33 +226,62 @@ export class GameScene extends Phaser.Scene {
 
   _createPlayerSprite(p) {
     const colorInt = parseInt(p.color.replace('#', ''), 16);
-    const texKey = 'char_' + p.id;
+    // Lighten body color for highlight
+    const r = (colorInt >> 16) & 0xff;
+    const gv = (colorInt >> 8) & 0xff;
+    const b = colorInt & 0xff;
+    const lightInt = (Math.min(255, r + 60) << 16) | (Math.min(255, gv + 60) << 8) | Math.min(255, b + 60);
+    const darkInt  = (Math.max(0, r - 40) << 16) | (Math.max(0, gv - 40) << 8) | Math.max(0, b - 40);
 
-    // Draw Paper.io-style character into a texture
-    const g = this.make.graphics({ add: false });
-    // Body: rounded rect 16×20, player color
-    g.fillStyle(colorInt, 1);
-    g.fillRoundedRect(4, 10, 16, 20, 4);
-    // Head: circle 10px, skin tone
-    g.fillStyle(0xFFCC99, 1);
-    g.fillCircle(12, 8, 7);
-    // Eyes: white
-    g.fillStyle(0xffffff, 1);
-    g.fillCircle(9, 7, 2);
-    g.fillCircle(15, 7, 2);
-    // Pupils: black dot
-    g.fillStyle(0x000000, 1);
-    g.fillCircle(9, 7, 1);
-    g.fillCircle(15, 7, 1);
-    // Gun: small rect, dark, centered on body
-    g.fillStyle(0x333333, 1);
-    g.fillRect(16, 17, 10, 4);
-    g.generateTexture(texKey, 28, 32);
-    g.destroy();
+    const texKey = 'char_' + p.color.replace('#', '');
+    if (!this.textures.exists(texKey)) {
+      const g = this.make.graphics({ add: false });
+      // Drop shadow
+      g.fillStyle(0x000000, 0.35);
+      g.fillEllipse(14, 33, 20, 6);
+      // Body: rounded rect, gradient-ish using two layers
+      g.fillStyle(colorInt, 1);
+      g.fillRoundedRect(3, 11, 22, 22, 5);
+      g.fillStyle(lightInt, 0.4);
+      g.fillRoundedRect(3, 11, 22, 10, { tl: 5, tr: 5, bl: 0, br: 0 });
+      g.fillStyle(darkInt, 0.3);
+      g.fillRoundedRect(3, 23, 22, 10, { tl: 0, tr: 0, bl: 5, br: 5 });
+      // Head: circle skin tone
+      g.fillStyle(0xFFCC99, 1);
+      g.fillCircle(14, 9, 8);
+      // Head highlight
+      g.fillStyle(0xffffff, 0.35);
+      g.fillCircle(12, 7, 4);
+      // Eyes: white sclera
+      g.fillStyle(0xffffff, 1);
+      g.fillCircle(11, 8, 2.5);
+      g.fillCircle(17, 8, 2.5);
+      // Pupils: big friendly eyes
+      g.fillStyle(0x222222, 1);
+      g.fillCircle(11, 9, 1.5);
+      g.fillCircle(17, 9, 1.5);
+      // Eye shine
+      g.fillStyle(0xffffff, 1);
+      g.fillCircle(12, 8, 0.7);
+      g.fillCircle(18, 8, 0.7);
+      // Gun barrel: colored dark, right side
+      g.fillStyle(0x222222, 1);
+      g.fillRoundedRect(20, 19, 12, 5, 2);
+      // Gun nozzle: bright accent
+      g.fillStyle(lightInt, 0.9);
+      g.fillRect(30, 20, 3, 3);
+      g.generateTexture(texKey, 34, 36);
+      g.destroy();
+    }
 
     const body = this.add.image(p.x, p.y, texKey).setDepth(5).setOrigin(0.5);
-    const label = this.add.text(p.x, p.y - 22, p.id.slice(0, 6), {
-      fontSize: '10px', color: '#fff', stroke: '#000', strokeThickness: 2
+    const isOwn = p.id === this.playerId;
+    const label = this.add.text(p.x, p.y - 26, isOwn ? 'YOU' : p.id.slice(0, 6), {
+      fontSize: '10px',
+      color: isOwn ? p.color : '#fff',
+      stroke: '#000',
+      strokeThickness: 2,
+      fontStyle: isOwn ? 'bold' : 'normal'
     }).setOrigin(0.5).setDepth(6);
     this.playerSprites.set(p.id, { body, label, baseY: p.y });
     this.playerData.set(p.id, p);
@@ -264,7 +306,18 @@ export class GameScene extends Phaser.Scene {
     const star = this.add.image(px, py, 'checkpoint_star')
       .setDepth(2)
       .setScale(1.4)
-      .setAlpha(0.95);
+      .setAlpha(0.95)
+      .setTint(parseInt((owner?.color ?? '#ffffff').replace('#', ''), 16));
+    // Pulse animation
+    this.tweens.add({
+      targets: star,
+      scaleX: 1.8, scaleY: 1.8,
+      alpha: 0.7,
+      duration: 900,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut'
+    });
     this.checkpointSprites.set(c.ownerId, star);
   }
 

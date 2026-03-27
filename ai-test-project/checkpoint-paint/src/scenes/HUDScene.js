@@ -9,13 +9,16 @@ export class HUDScene extends Phaser.Scene {
     const H = this.scale.height;
 
     // Ink bar background
-    this.add.rectangle(W / 2, H - 30, 200, 16, 0x333333).setOrigin(0.5).setScrollFactor(0).setDepth(15);
-    this.inkBar = this.add.rectangle(W / 2 - 100, H - 30, 200, 16, 0x00aaff).setOrigin(0, 0.5).setScrollFactor(0).setDepth(16);
-    this.add.text(W / 2, H - 50, 'INK', { fontSize: '12px', color: '#aaaaff' }).setOrigin(0.5).setScrollFactor(0).setDepth(16);
+    this.add.rectangle(W / 2, H - 28, 220, 22, 0x000000, 0.55).setOrigin(0.5).setScrollFactor(0).setDepth(15);
+    this.add.rectangle(W / 2, H - 28, 210, 14, 0x222222).setOrigin(0.5).setScrollFactor(0).setDepth(15);
+    this.inkBar = this.add.rectangle(W / 2 - 105, H - 28, 210, 14, 0x00aaff).setOrigin(0, 0.5).setScrollFactor(0).setDepth(16);
+    this.inkLabel = this.add.text(W / 2, H - 46, 'INK  100', {
+      fontSize: '11px', color: '#ccccff', stroke: '#000', strokeThickness: 2
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(16);
 
     // Zone indicator text below ink bar
-    this.zoneText = this.add.text(W / 2, H - 12, 'NEUTRAL', {
-      fontSize: '11px', color: '#aaaaaa', stroke: '#000', strokeThickness: 2
+    this.zoneText = this.add.text(W / 2, H - 10, '● NEUTRAL', {
+      fontSize: '11px', color: '#aaaaaa', stroke: '#000', strokeThickness: 2, fontStyle: 'bold'
     }).setOrigin(0.5).setScrollFactor(0).setDepth(16);
 
     this.inkLevel = INK_MAX;
@@ -30,11 +33,11 @@ export class HUDScene extends Phaser.Scene {
     gameScene.events.on('zone_update', (zone) => {
       this.zoneType = zone;
       if (zone === 'own') {
-        this.zoneText.setText('ZONE OWN').setColor('#00ff88');
+        this.zoneText.setText('⚡ OWN ZONE  +SPEED +INK').setColor('#00ff88');
       } else if (zone === 'enemy') {
-        this.zoneText.setText('ZONE ENEMY').setColor('#ff4444');
+        this.zoneText.setText('⚠ ENEMY ZONE  SLOW').setColor('#ff4444');
       } else {
-        this.zoneText.setText('NEUTRAL').setColor('#aaaaaa');
+        this.zoneText.setText('● NEUTRAL').setColor('#aaaaaa');
       }
     });
 
@@ -51,14 +54,27 @@ export class HUDScene extends Phaser.Scene {
       }
     });
 
+    // Score panel background
+    this.scoreBg = this.add.rectangle(W - 5, 5, 130, 100, 0x000000, 0.45)
+      .setOrigin(1, 0).setScrollFactor(0).setDepth(15);
+
     this.scores = [];
     this.scoreText = this.add.text(W - 10, 10, '', {
       fontSize: '12px',
       color: '#ffffff',
       stroke: '#000',
-      strokeThickness: 3,
-      align: 'right'
+      strokeThickness: 2,
+      align: 'right',
+      lineSpacing: 2
     }).setOrigin(1, 0).setScrollFactor(0).setDepth(16);
+
+    // Colored dots next to score entries
+    this._scoreDots = [];
+    for (let i = 0; i < 6; i++) {
+      const dot = this.add.circle(W - 122, 26 + i * 16, 4, 0xffffff)
+        .setScrollFactor(0).setDepth(17).setAlpha(0);
+      this._scoreDots.push(dot);
+    }
 
     gameScene.events.on('score_update', (scores) => {
       this.scores = scores || [];
@@ -104,12 +120,16 @@ export class HUDScene extends Phaser.Scene {
 
   update() {
     const pct = this.inkLevel / INK_MAX;
-    this.inkBar.setDisplaySize(200 * pct, 16);
+    this.inkBar.setDisplaySize(210 * pct, 14);
     // Use player color for bar, fallback to red when low
     if (pct <= 0.3) {
       this.inkBar.setFillStyle(0xff4444);
     } else {
       this.inkBar.setFillStyle(this.playerColor);
+    }
+    if (this.inkLabel) {
+      this.inkLabel.setText(`INK  ${Math.ceil(this.inkLevel)}`);
+      this.inkLabel.setColor(pct <= 0.3 ? '#ff8888' : '#ccccff');
     }
 
     // Timer pulse red when < 30s — update GameScene timer text color
@@ -122,12 +142,25 @@ export class HUDScene extends Phaser.Scene {
   _renderScores() {
     if (!this.scoreText) return;
     const lines = ['TOP 5'];
-    for (let i = 0; i < Math.min(5, this.scores.length); i++) {
+    const count = Math.min(5, this.scores.length);
+    for (let i = 0; i < count; i++) {
       const s = this.scores[i];
       const name = (s.id || '').slice(0, 6);
-      const score = Math.floor(s.score || 0);
-      lines.push(`${i + 1}. ${name}  ${score}`);
+      const pct = Math.floor((s.score || 0) / (240 * 240) * 100);
+      lines.push(`${i + 1}. ${name}  ${pct}%`);
+
+      // Update dot color
+      if (this._scoreDots[i] && s.color) {
+        const c = parseInt(s.color.replace('#', ''), 16);
+        this._scoreDots[i].setFillStyle(c).setAlpha(1);
+      }
     }
+    // Hide unused dots
+    for (let i = count; i < this._scoreDots.length; i++) {
+      this._scoreDots[i].setAlpha(0);
+    }
+    const textH = 14 + count * 16;
+    this.scoreBg?.setSize(130, textH + 10);
     this.scoreText.setText(lines.join('\n'));
   }
 }
