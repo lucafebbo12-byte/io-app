@@ -1,7 +1,8 @@
 import {
   MAP_W, MAP_H, TILE_SIZE, PLAYER_SPEED,
   INK_DRAIN, INK_REFILL, INK_MAX, SPAWN_POINTS, PLAYER_COLORS,
-  ZONE_SPEED_OWN, ZONE_SPEED_ENEMY, ZONE_DRAIN_OWN, ZONE_DRAIN_ENEMY, ZONE_REFILL_ENEMY
+  ZONE_SPEED_OWN, ZONE_SPEED_ENEMY, ZONE_DRAIN_OWN, ZONE_DRAIN_ENEMY, ZONE_REFILL_ENEMY,
+  WALL_THICKNESS_TILES
 } from '../shared/constants.js';
 
 export class Player {
@@ -47,8 +48,11 @@ export class Player {
     const nx = this._dx / len;
     const ny = this._dy / len;
     const speed = PLAYER_SPEED * this.zoneMult.speed;
-    this.x = Math.max(0, Math.min((MAP_W * TILE_SIZE) - 1, this.x + nx * speed));
-    this.y = Math.max(0, Math.min((MAP_H * TILE_SIZE) - 1, this.y + ny * speed));
+    const min = WALL_THICKNESS_TILES * TILE_SIZE;
+    const maxX = (MAP_W - WALL_THICKNESS_TILES) * TILE_SIZE - 1;
+    const maxY = (MAP_H - WALL_THICKNESS_TILES) * TILE_SIZE - 1;
+    this.x = Math.max(min, Math.min(maxX, this.x + nx * speed));
+    this.y = Math.max(min, Math.min(maxY, this.y + ny * speed));
   }
 
   tileX() { return Math.floor(this.x / TILE_SIZE); }

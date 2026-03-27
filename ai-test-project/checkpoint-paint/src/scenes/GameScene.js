@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { TILE_SIZE, PLAYER_COLORS } from '../../shared/constants.js';
+import { TILE_SIZE, PLAYER_COLORS, WALL_OWNER_INDEX, WALL_COLOR } from '../../shared/constants.js';
 import { NetworkManager } from '../systems/NetworkManager.js';
 import { TerritoryMap } from '../systems/TerritoryMap.js';
 import { SprayEffect } from '../systems/SprayEffect.js';
@@ -15,6 +15,13 @@ export class GameScene extends Phaser.Scene {
     g.fillCircle(4, 4, 4);
     g.generateTexture('dot', 8, 8);
     g.destroy();
+
+    // Checkpoint icon (white star)
+    const star = this.make.graphics({ add: false });
+    star.fillStyle(0xffffff, 1);
+    star.fillStar(10, 10, 5, 4, 9);
+    star.generateTexture('checkpoint_star', 20, 20);
+    star.destroy();
   }
 
   create() {
@@ -47,9 +54,10 @@ export class GameScene extends Phaser.Scene {
 
   // ─── Network callbacks ─────────────────────────────────────────────────────
 
-  onInit({ playerId, mapW, mapH, tileSize, players, checkpoints, timeLeft }) {
+  onInit({ playerId, mapW, mapH, tileSize, initialTiles = [], players, checkpoints, timeLeft, countdown }) {
     this.playerId = playerId;
     this.tileSize = tileSize;
+    this._lastCountdown = countdown ?? 0;
 
     // Build color lookup: colorIndex → hex
     const colorMap = {};
@@ -58,8 +66,10 @@ export class GameScene extends Phaser.Scene {
       colorMap[i + 1] = c;
       this.colorIndexByHex[c] = i + 1;
     });
+    colorMap[WALL_OWNER_INDEX] = WALL_COLOR;
 
     this.territory = new TerritoryMap(this, mapW, mapH, colorMap);
+    this.territory.applyDelta(initialTiles);
 
     // Camera
     const worldW = mapW * tileSize;
@@ -236,10 +246,26 @@ export class GameScene extends Phaser.Scene {
   }
 
   _createCheckpointSprite(c) {
-    const g = this.add.graphics().setDepth(2);
-    g.fillStyle(0xffffff, 0.8);
-    g.fillStar(c.tileX * this.tileSize, c.tileY * this.tileSize, 5, 6, 12);
-    this.checkpointSprites.set(c.ownerId, g);
+    const owner = this.playerData.get(c.ownerId);
+    const ownerIndex = this.colorIndexByHex[owner?.color] ?? 1;
+
+    // 5x5 base zone in owner's color (drawn into the territory render texture)
+    const baseTiles = [];
+    for (let dy = -2; dy <= 2; dy++) {
+      for (let dx = -2; dx <= 2; dx++) {
+        baseTiles.push({ x: c.tileX + dx, y: c.tileY + dy, owner: ownerIndex });
+      }
+    }
+    this.territory?.applyDelta(baseTiles);
+
+    // Big star icon on top (separate sprite so we can remove it)
+    const px = (c.tileX + 0.5) * this.tileSize;
+    const py = (c.tileY + 0.5) * this.tileSize;
+    const star = this.add.image(px, py, 'checkpoint_star')
+      .setDepth(2)
+      .setScale(1.4)
+      .setAlpha(0.95);
+    this.checkpointSprites.set(c.ownerId, star);
   }
 
   _removePlayer(id) {

@@ -1,7 +1,14 @@
 import {
-  BOT_COUNT, MAX_PLAYERS, ROUND_TIME, TILE_SIZE,
-  TICK_RATE, BROADCAST_RATE, RESPAWN_DELAY, MAP_W, MAP_H,
-  SPAWN_POINTS
+  BOT_COUNT,
+  MAX_PLAYERS,
+  ROUND_TIME,
+  TILE_SIZE,
+  TICK_RATE,
+  BROADCAST_RATE,
+  RESPAWN_DELAY,
+  MAP_W,
+  MAP_H,
+  CORNER_CHECKPOINTS
 } from '../shared/constants.js';
 import { Player } from './Player.js';
 import { Bot } from './Bot.js';
@@ -15,9 +22,11 @@ const BROADCAST_EVERY = TICK_RATE / BROADCAST_RATE; // every 2 ticks
 export class GameRoom {
   constructor(io) {
     this.io = io;
-    this.players = new Map();      // id → Player
-    this.checkpoints = new Map();  // playerId → Checkpoint
+    this.players = new Map(); // id -> Player
+    this.checkpoints = new Map(); // playerId -> Checkpoint
     this.map = new GameMap();
+    this.initialTiles = [];
+
     this.timeLeft = ROUND_TIME;
     this.gameOver = false;
     this._tick = 0;
@@ -26,53 +35,54 @@ export class GameRoom {
     this.countdown = 3 * TICK_RATE; // 3-second countdown before bots start
 
     this._addBots();
-    this._prePaintSpawns();
+    this._seedInitialMap();
     this._loop = setInterval(() => this._step(), TICK_MS);
+  }
+
+  _checkpointTileForIndex(index) {
+    if (index < CORNER_CHECKPOINTS.length) return CORNER_CHECKPOINTS[index];
+    return null;
   }
 
   _addBots() {
     for (let i = 0; i < BOT_COUNT; i++) {
       const bot = new Bot(`bot_${i}`, this._playerIndex++);
       this.players.set(bot.id, bot);
-      this.checkpoints.set(bot.id, new Checkpoint(bot));
+
+      const cp = this._checkpointTileForIndex(bot.index);
+      this.checkpoints.set(bot.id, new Checkpoint(bot, cp?.x ?? null, cp?.y ?? null));
     }
   }
 
-  _prePaintSpawns() {
-    const PAINT_HALF = 15; // 30x30 tile square
-    for (const p of this.players.values()) {
-      const spawnIdx = p.index % SPAWN_POINTS.length;
-      const sp = SPAWN_POINTS[spawnIdx];
-      const cx = sp.x;
-      const cy = sp.y;
-      for (let dy = -PAINT_HALF; dy < PAINT_HALF; dy++) {
-        for (let dx = -PAINT_HALF; dx < PAINT_HALF; dx++) {
-          const tx = cx + dx;
-          const ty = cy + dy;
-          if (tx >= 0 && tx < MAP_W && ty >= 0 && ty < MAP_H) {
-            this.map.paint(tx, ty, p.colorIndex);
-          }
-        }
-      }
+  _seedInitialMap() {
+    // Pre-paint the map into 4 quadrants using the first 4 bots' colors.
+    const quadrantOwners = [];
+    for (let i = 0; i < 4; i++) {
+      const bot = this.players.get(`bot_${i}`);
+      quadrantOwners.push(bot?.colorIndex ?? (i + 1));
     }
-    // Flush the pre-paint dirty tiles so they are sent on first delta
+    this.map.seedQuadrants(quadrantOwners);
+    this.initialTiles = this.map.serializeAll();
   }
 
   addPlayer(socket) {
     if (this.players.size >= MAX_PLAYERS) return;
     const player = new Player(socket.id, this._playerIndex++);
     this.players.set(socket.id, player);
-    this.checkpoints.set(socket.id, new Checkpoint(player));
 
-    // send initial state
+    const cp = this._checkpointTileForIndex(player.index);
+    this.checkpoints.set(socket.id, new Checkpoint(player, cp?.x ?? null, cp?.y ?? null));
+
     socket.emit('init', {
       playerId: socket.id,
       mapW: MAP_W,
       mapH: MAP_H,
       tileSize: TILE_SIZE,
+      initialTiles: this.initialTiles,
       players: this._serializePlayers(),
       checkpoints: this._serializeCheckpoints(),
-      timeLeft: this.timeLeft
+      timeLeft: this.timeLeft,
+      countdown: this.countdown > 0 ? Math.ceil(this.countdown / TICK_RATE) : 0
     });
     socket.broadcast.emit('player_joined', player.serialize());
   }
@@ -92,7 +102,6 @@ export class GameRoom {
     if (this.gameOver) return;
     this._tick++;
 
-    // Countdown before bots start
     if (this.countdown > 0) this.countdown--;
 
     const allPlayers = [...this.players.values()];
@@ -110,15 +119,12 @@ export class GameRoom {
     for (const p of allPlayers) {
       if (!p.alive || !p.spraying || p.ink <= 0) continue;
       const tiles = getConeTiles(p.x, p.y, p.aimAngle);
-      for (const t of tiles) {
-        this.map.paint(t.x, t.y, p.colorIndex);
-      }
+      for (const t of tiles) this.map.paint(t.x, t.y, p.colorIndex);
     }
 
-    const dirty = this.map.flushDirty();
-    changedTiles.push(...dirty);
+    changedTiles.push(...this.map.flushDirty());
 
-    // update ink (check own tile, pass map for zone detection)
+    // update ink + score
     for (const p of allPlayers) {
       const onOwn = this.map.getOwner(p.tileX(), p.tileY()) === p.colorIndex;
       p.updateInk(onOwn, this.map);
@@ -130,8 +136,12 @@ export class GameRoom {
     for (const painted of changedTiles) {
       for (const p of allPlayers) {
         if (!p.alive || hitSet.has(p.id)) continue;
-        if (painted.owner !== p.colorIndex && painted.owner !== 0 &&
-            painted.x === p.tileX() && painted.y === p.tileY()) {
+        if (
+          painted.owner !== p.colorIndex &&
+          painted.owner !== 0 &&
+          painted.x === p.tileX() &&
+          painted.y === p.tileY()
+        ) {
           hitSet.add(p.id);
           this._killPlayer(p);
         }
@@ -153,10 +163,8 @@ export class GameRoom {
       this.timeLeft = Math.max(0, this.timeLeft - 1);
     }
 
-    // win check
     this._checkWin();
 
-    // broadcast delta at BROADCAST_RATE
     if (this._tick % BROADCAST_EVERY === 0) {
       this.io.emit('delta', {
         players: this._serializePlayers(),
@@ -200,9 +208,13 @@ export class GameRoom {
     }
 
     if (this.timeLeft <= 0) {
-      let best = null, bestScore = -1;
+      let best = null;
+      let bestScore = -1;
       for (const p of this.players.values()) {
-        if (p.score > bestScore) { bestScore = p.score; best = p; }
+        if (p.score > bestScore) {
+          bestScore = p.score;
+          best = p;
+        }
       }
       this._endGame(best);
     }

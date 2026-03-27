@@ -1,12 +1,12 @@
 import { TILE_SIZE, CHECKPOINT_RADIUS } from '../shared/constants.js';
 
 export class Checkpoint {
-  constructor(player) {
+  constructor(player, tileX = null, tileY = null) {
     this.ownerId = player.id;
     this.ownerIndex = player.colorIndex;
-    // checkpoint at spawn tile position
-    this.tileX = Math.floor(player.spawnX / TILE_SIZE);
-    this.tileY = Math.floor(player.spawnY / TILE_SIZE);
+    // checkpoint at given tile position (or spawn tile position)
+    this.tileX = tileX ?? Math.floor(player.spawnX / TILE_SIZE);
+    this.tileY = tileY ?? Math.floor(player.spawnY / TILE_SIZE);
     this.alive = true;
   }
 
