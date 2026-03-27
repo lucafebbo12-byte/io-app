@@ -57,10 +57,10 @@ export class GameRoom {
   _seedInitialMap() {
     // Pre-paint the map into 4 quadrants using the first 4 bots' colors.
     const quadrantOwners = [];
-    for (let i = 0; i < 4; i++) {
-      const bot = this.players.get(`bot_${i}`);
-      quadrantOwners.push(bot?.colorIndex ?? (i + 1));
-    }
+    const bots = [...this.players.values()]
+      .filter(p => p.isBot)
+      .sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+    for (let i = 0; i < 4; i++) quadrantOwners.push(bots[i]?.colorIndex ?? (i + 1));
     this.map.seedQuadrants(quadrantOwners);
     this.initialTiles = this.map.serializeAll();
   }

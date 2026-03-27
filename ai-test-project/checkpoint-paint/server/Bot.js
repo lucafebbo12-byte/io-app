@@ -1,10 +1,14 @@
 import { MAP_W, MAP_H, TILE_SIZE, SPRAY_RANGE } from '../shared/constants.js';
 import { Player } from './Player.js';
 
+const BOT_NAMES = ['InkBot', 'SplatBot', 'PaintBot', 'DripBot', 'SprayBot', 'BlastBot', 'GushBot', 'FloodBot'];
+
 export class Bot extends Player {
   constructor(id, index) {
     super(id, index);
     this.isBot = true;
+    this.name = BOT_NAMES[index % BOT_NAMES.length];
+    this.id = this.name;
 
     this._changeDirIn = 0;
     this._roamAngle = Math.random() * Math.PI * 2;
