@@ -47,6 +47,9 @@ export class GameScene extends Phaser.Scene {
       fontSize: '28px', color: '#ffff00', stroke: '#000', strokeThickness: 4
     }).setOrigin(0.5).setScrollFactor(0).setDepth(20).setAlpha(0);
 
+    // Aim cone indicator (spray arc)
+    this.aimCone = this.add.graphics().setDepth(4).setVisible(false);
+
     // Countdown text
     this.countdownText = this.add.text(this.scale.width / 2, this.scale.height * 0.35, '', {
       fontSize: '72px', color: '#ffffff', stroke: '#000', strokeThickness: 6
@@ -249,6 +252,28 @@ export class GameScene extends Phaser.Scene {
         ownerIndex,
         local?.ink ?? this.localInk ?? 100
       );
+    }
+
+    // Spray arc cone indicator
+    this.aimCone.clear();
+    const canSpray = !!sprites && !!local?.alive && input.spraying && (local?.ink ?? this.localInk ?? 100) > 0;
+    if (canSpray) {
+      const range = 60;
+      const tipWidth = 28;
+      const px = sprites.container.x;
+      const py = sprites.container.y;
+      const a = input.aimAngle;
+      const tx = px + Math.cos(a) * range;
+      const ty = py + Math.sin(a) * range;
+      const perpX = -Math.sin(a) * (tipWidth / 2);
+      const perpY = Math.cos(a) * (tipWidth / 2);
+
+      const colorInt = parseInt(String(local?.color ?? '#ffffff').replace('#', ''), 16);
+      this.aimCone.setVisible(true);
+      this.aimCone.fillStyle(colorInt, 0.25);
+      this.aimCone.fillTriangle(px, py, tx + perpX, ty + perpY, tx - perpX, ty - perpY);
+    } else {
+      this.aimCone.setVisible(false);
     }
 
     // Walking bobble for all player sprites
