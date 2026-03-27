@@ -182,6 +182,25 @@ export class GameScene extends Phaser.Scene {
 
   onPlayerHit({ playerId }) {
     const s = this.playerSprites.get(playerId);
+    const p = this.playerData.get(playerId);
+
+    // Death burst particles
+    const bx = s?.container?.x ?? p?.x ?? 0;
+    const by = s?.container?.y ?? p?.y ?? 0;
+    const burstColorInt = parseInt(String(p?.color ?? '#ffffff').replace('#', ''), 16);
+    const burst = this.add.particles(bx, by, 'dot', {
+      speed: { min: 80, max: 220 },
+      scale: { start: 1.1, end: 0 },
+      lifespan: 500,
+      tint: burstColorInt,
+      emitting: false
+    });
+    burst.setDepth(6);
+    burst.explode(20, bx, by);
+    this.time.delayedCall(650, () => burst.destroy());
+
+    if (playerId === this.playerId) this.cameras.main.shake(180, 0.012);
+
     if (s) {
       this.tweens.killTweensOf(s.container);
       s.container.setVisible(true).setAlpha(1);
