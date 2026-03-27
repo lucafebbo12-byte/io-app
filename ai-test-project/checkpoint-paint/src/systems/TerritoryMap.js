@@ -18,6 +18,9 @@ export class TerritoryMap {
       const g = scene.add.graphics();
       g.fillStyle(parseInt(hex.replace('#', ''), 16), 1);
       g.fillRect(0, 0, TILE_SIZE, TILE_SIZE);
+      // Shine overlay: top-left triangle in white at 30% alpha
+      g.fillStyle(0xffffff, 0.3);
+      g.fillTriangle(0, 0, TILE_SIZE, 0, 0, TILE_SIZE);
       this._tiles[idx] = g;
     }
     // Neutral tile (erase = transparent)

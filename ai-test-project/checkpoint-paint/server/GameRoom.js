@@ -1,6 +1,7 @@
 import {
   BOT_COUNT, MAX_PLAYERS, ROUND_TIME, TILE_SIZE,
-  TICK_RATE, BROADCAST_RATE, RESPAWN_DELAY, MAP_W, MAP_H
+  TICK_RATE, BROADCAST_RATE, RESPAWN_DELAY, MAP_W, MAP_H,
+  SPAWN_POINTS
 } from '../shared/constants.js';
 import { Player } from './Player.js';
 import { Bot } from './Bot.js';
@@ -22,7 +23,10 @@ export class GameRoom {
     this._tick = 0;
     this._playerIndex = 0;
 
+    this.countdown = 3 * TICK_RATE; // 3-second countdown before bots start
+
     this._addBots();
+    this._prePaintSpawns();
     this._loop = setInterval(() => this._step(), TICK_MS);
   }
 
@@ -32,6 +36,26 @@ export class GameRoom {
       this.players.set(bot.id, bot);
       this.checkpoints.set(bot.id, new Checkpoint(bot));
     }
+  }
+
+  _prePaintSpawns() {
+    const PAINT_HALF = 15; // 30x30 tile square
+    for (const p of this.players.values()) {
+      const spawnIdx = p.index % SPAWN_POINTS.length;
+      const sp = SPAWN_POINTS[spawnIdx];
+      const cx = sp.x;
+      const cy = sp.y;
+      for (let dy = -PAINT_HALF; dy < PAINT_HALF; dy++) {
+        for (let dx = -PAINT_HALF; dx < PAINT_HALF; dx++) {
+          const tx = cx + dx;
+          const ty = cy + dy;
+          if (tx >= 0 && tx < MAP_W && ty >= 0 && ty < MAP_H) {
+            this.map.paint(tx, ty, p.colorIndex);
+          }
+        }
+      }
+    }
+    // Flush the pre-paint dirty tiles so they are sent on first delta
   }
 
   addPlayer(socket) {
@@ -68,12 +92,15 @@ export class GameRoom {
     if (this.gameOver) return;
     this._tick++;
 
+    // Countdown before bots start
+    if (this.countdown > 0) this.countdown--;
+
     const allPlayers = [...this.players.values()];
     const changedTiles = [];
 
-    // bots think
+    // bots think only after countdown
     for (const p of allPlayers) {
-      if (p.isBot && p.alive) p.think(allPlayers);
+      if (p.isBot && p.alive && this.countdown <= 0) p.think(allPlayers);
     }
 
     // move all players
@@ -91,10 +118,10 @@ export class GameRoom {
     const dirty = this.map.flushDirty();
     changedTiles.push(...dirty);
 
-    // update ink (check own tile)
+    // update ink (check own tile, pass map for zone detection)
     for (const p of allPlayers) {
       const onOwn = this.map.getOwner(p.tileX(), p.tileY()) === p.colorIndex;
-      p.updateInk(onOwn);
+      p.updateInk(onOwn, this.map);
       p.score = this.map.countTiles(p.colorIndex);
     }
 
@@ -134,7 +161,8 @@ export class GameRoom {
       this.io.emit('delta', {
         players: this._serializePlayers(),
         changedTiles,
-        timeLeft: this.timeLeft
+        timeLeft: this.timeLeft,
+        countdown: this.countdown > 0 ? Math.ceil(this.countdown / TICK_RATE) : 0
       });
     }
   }
