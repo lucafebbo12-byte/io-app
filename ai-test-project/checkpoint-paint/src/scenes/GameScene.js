@@ -77,6 +77,8 @@ export class GameScene extends Phaser.Scene {
     this.cameras.main.setBounds(0, 0, worldW, worldH);
     this.cameras.main.setZoom(2);
 
+    this._ensureCharacterTextures();
+
     players.forEach(p => this._createPlayerSprite(p));
     checkpoints.forEach(c => this._createCheckpointSprite(c));
 
@@ -117,41 +119,51 @@ export class GameScene extends Phaser.Scene {
       if (!sprites) { this._createPlayerSprite(p); continue; }
 
       // Smooth lerp toward server position
-      sprites.body.x = Phaser.Math.Linear(sprites.body.x, p.x, 0.3);
-      sprites.body.y = Phaser.Math.Linear(sprites.body.y, p.y, 0.3);
-      sprites.baseY = sprites.body.y;
-      if (sprites.glow) {
-        sprites.glow.x = sprites.body.x;
-        sprites.glow.y = sprites.body.y;
+      sprites.container.x = Phaser.Math.Linear(sprites.container.x, p.x, 0.3);
+      sprites.container.y = Phaser.Math.Linear(sprites.container.y, p.y, 0.3);
+      sprites.baseY = sprites.container.y;
+      sprites.label.setPosition(sprites.container.x, sprites.container.y - 26);
+
+      if (p.alive) {
+        sprites.container.setVisible(true);
+        sprites.container.setAlpha(1);
+      } else if (sprites.container.visible) {
+        sprites.container.setAlpha(0.2);
       }
-      sprites.label.setPosition(sprites.body.x, sprites.body.y - 22);
-      sprites.body.setAlpha(p.alive ? 1 : 0.2);
-      if (sprites.glow) sprites.glow.setAlpha(p.alive ? 0.55 : 0);
 
       // Zone visual feedback (tint + subtle size change)
       const zoneType = p.zoneType || 'neutral';
       if (zoneType === 'own') {
-        sprites.body.clearTint();
-        sprites.body.setScale(1.1);
-        if (sprites.glow) sprites.glow.setVisible(true).setScale(1.25);
+        sprites.base.clearTint();
+        sprites.gun.clearTint();
+        sprites.container.setScale(1.1);
+        sprites.glow.setVisible(true);
       } else if (zoneType === 'enemy') {
-        sprites.body.setTint(0xff6666);
-        sprites.body.setScale(0.9);
-        if (sprites.glow) sprites.glow.setVisible(false);
+        sprites.base.setTint(0xff6666);
+        sprites.gun.setTint(0xff6666);
+        sprites.container.setScale(0.9);
+        sprites.glow.setVisible(false);
       } else {
-        sprites.body.clearTint();
-        sprites.body.setScale(1.0);
-        if (sprites.glow) sprites.glow.setVisible(false);
+        sprites.base.clearTint();
+        sprites.gun.clearTint();
+        sprites.container.setScale(1.0);
+        sprites.glow.setVisible(false);
       }
 
       if (p.id === this.playerId) this.events.emit('zone_update', zoneType);
 
+      // Aim + spray animation (gun only)
+      sprites.gun.setRotation(p.aimAngle);
+      const gunKick = p.spraying && p.alive ? 2 : 0;
+      sprites.gun.x = sprites.gunBaseX + Math.cos(p.aimAngle) * gunKick;
+      sprites.gun.y = sprites.gunBaseY + Math.sin(p.aimAngle) * gunKick;
+
       // Spray FX
-      this.spray.update(p.id, sprites.body.x, sprites.body.y, p.aimAngle, p.spraying && p.alive, p.color);
+      this.spray.update(p.id, sprites.container.x, sprites.container.y, p.aimAngle, p.spraying && p.alive, p.color);
 
       // Camera follow own player
       if (p.id === this.playerId) {
-        this.cameras.main.centerOn(sprites.body.x, sprites.body.y);
+        this.cameras.main.centerOn(sprites.container.x, sprites.container.y);
         this.localInk = p.ink;
         this.events.emit('ink_update', p.ink);
       }
@@ -163,20 +175,39 @@ export class GameScene extends Phaser.Scene {
 
   onPlayerHit({ playerId }) {
     const s = this.playerSprites.get(playerId);
-    if (s) s.body.setAlpha(0.2);
+    if (s) {
+      this.tweens.killTweensOf(s.container);
+      s.container.setVisible(true).setAlpha(1);
+      s.container.angle = 0;
+      this.tweens.add({
+        targets: s.container,
+        angle: 360,
+        scaleX: 0,
+        scaleY: 0,
+        alpha: 0,
+        duration: 300,
+        ease: 'Cubic.easeIn',
+        onComplete: () => s.container.setVisible(false)
+      });
+    }
     if (playerId === this.playerId) this._showMsg('💀 You died! Respawning...');
     this.events.emit('kill_feed', { victimId: playerId });
   }
 
   onPlayerRespawn({ playerId }) {
     const s = this.playerSprites.get(playerId);
-    if (s) s.body.setAlpha(1);
+    if (s) {
+      this.tweens.killTweensOf(s.container);
+      s.container.setVisible(true).setAlpha(1);
+      s.container.setScale(1);
+      s.container.angle = 0;
+    }
     if (playerId === this.playerId) this._showMsg('✅ Respawned!');
   }
 
   onPlayerEliminated({ playerId }) {
     const s = this.playerSprites.get(playerId);
-    if (s) { s.body.destroy(); s.label.destroy(); this.playerSprites.delete(playerId); }
+    if (s) { s.container.destroy(); s.label.destroy(); this.playerSprites.delete(playerId); }
     if (playerId === this.playerId) this._showMsg('☠️ You are eliminated!');
   }
 
@@ -206,8 +237,8 @@ export class GameScene extends Phaser.Scene {
     const sprites = this.playerSprites.get(this.playerId);
     if (sprites) {
       this.spray.predictLocalPaint(
-        sprites.body.x,
-        sprites.body.y,
+        sprites.container.x,
+        sprites.container.y,
         input.aimAngle,
         input.spraying,
         ownerIndex,
@@ -217,77 +248,97 @@ export class GameScene extends Phaser.Scene {
 
     // Walking bobble for all player sprites
     for (const [id, s] of this.playerSprites) {
-      const baseY = s.baseY ?? s.body.y;
+      const baseY = s.baseY ?? s.container.y;
       const bob = Math.sin(time * 0.008) * 2;
-      s.body.y = baseY + bob;
-      if (s.glow) {
-        s.glow.y = baseY + bob;
-        if (s.glow.visible) s.glow.setScale(1.25 + Math.sin(time * 0.01) * 0.05);
-      }
+      s.container.y = baseY + bob;
+      if (s.glow?.visible) s.glow.setScale(1.15 + Math.sin(time * 0.01) * 0.05);
     }
   }
 
   // ─── Helpers ───────────────────────────────────────────────────────────────
 
-  _createPlayerSprite(p) {
-    const colorInt = parseInt(p.color.replace('#', ''), 16);
-    // Lighten body color for highlight
-    const r = (colorInt >> 16) & 0xff;
-    const gv = (colorInt >> 8) & 0xff;
-    const b = colorInt & 0xff;
-    const lightInt = (Math.min(255, r + 60) << 16) | (Math.min(255, gv + 60) << 8) | Math.min(255, b + 60);
-    const darkInt  = (Math.max(0, r - 40) << 16) | (Math.max(0, gv - 40) << 8) | Math.max(0, b - 40);
-
-    const texKey = 'char_' + p.color.replace('#', '');
-    if (!this.textures.exists(texKey)) {
+  _ensureCharacterTextures() {
+    if (!this.textures.exists('char_gun')) {
       const g = this.make.graphics({ add: false });
-      // Drop shadow
-      g.fillStyle(0x000000, 0.35);
-      g.fillEllipse(14, 33, 20, 6);
-      // Body: rounded rect, gradient-ish using two layers
-      g.fillStyle(colorInt, 1);
-      g.fillRoundedRect(3, 11, 22, 22, 5);
-      g.fillStyle(lightInt, 0.4);
-      g.fillRoundedRect(3, 11, 22, 10, { tl: 5, tr: 5, bl: 0, br: 0 });
-      g.fillStyle(darkInt, 0.3);
-      g.fillRoundedRect(3, 23, 22, 10, { tl: 0, tr: 0, bl: 5, br: 5 });
-      // Head: circle skin tone
-      g.fillStyle(0xFFCC99, 1);
-      g.fillCircle(14, 9, 8);
-      // Head highlight
-      g.fillStyle(0xffffff, 0.35);
-      g.fillCircle(12, 7, 4);
-      // Eyes: white sclera
-      g.fillStyle(0xffffff, 1);
-      g.fillCircle(11, 8, 2.5);
-      g.fillCircle(17, 8, 2.5);
-      // Pupils: big friendly eyes
-      g.fillStyle(0x222222, 1);
-      g.fillCircle(11, 9, 1.5);
-      g.fillCircle(17, 9, 1.5);
-      // Eye shine
-      g.fillStyle(0xffffff, 1);
-      g.fillCircle(12, 8, 0.7);
-      g.fillCircle(18, 8, 0.7);
-      // Gun barrel: colored dark, right side
-      g.fillStyle(0x222222, 1);
-      g.fillRoundedRect(20, 19, 12, 5, 2);
-      // Gun nozzle: bright accent
-      g.fillStyle(lightInt, 0.9);
-      g.fillRect(30, 20, 3, 3);
-      g.generateTexture(texKey, 34, 36);
+      g.fillStyle(0x333333, 1);
+      g.fillRoundedRect(0, 2, 12, 4, 2);
+      g.fillStyle(0xffffff, 0.25);
+      g.fillTriangle(0, 2, 12, 2, 0, 6);
+      g.generateTexture('char_gun', 12, 8);
       g.destroy();
     }
 
-    const glow = this.add.image(p.x, p.y, texKey)
-      .setDepth(4)
+    for (const hex of PLAYER_COLORS) {
+      const colorInt = parseInt(hex.replace('#', ''), 16);
+      const r = (colorInt >> 16) & 0xff;
+      const gv = (colorInt >> 8) & 0xff;
+      const b = colorInt & 0xff;
+      const lightInt =
+        (Math.min(255, r + 60) << 16) | (Math.min(255, gv + 60) << 8) | Math.min(255, b + 60);
+      const darkInt =
+        (Math.max(0, r - 40) << 16) | (Math.max(0, gv - 40) << 8) | Math.max(0, b - 40);
+
+      const texKey = 'char_base_' + hex.replace('#', '');
+      if (this.textures.exists(texKey)) continue;
+
+      const g = this.make.graphics({ add: false });
+      // Shadow
+      g.fillStyle(0x000000, 0.28);
+      g.fillEllipse(17, 33, 20, 6);
+
+      // Body (rounded rect + simple highlight)
+      g.fillStyle(colorInt, 1);
+      g.fillRoundedRect(6, 12, 22, 22, 6);
+      g.fillStyle(lightInt, 0.45);
+      g.fillRoundedRect(6, 12, 22, 10, { tl: 6, tr: 6, bl: 0, br: 0 });
+      g.fillStyle(darkInt, 0.25);
+      g.fillRoundedRect(6, 24, 22, 10, { tl: 0, tr: 0, bl: 6, br: 6 });
+
+      // Head + eyes
+      g.fillStyle(0xffcc99, 1);
+      g.fillCircle(17, 10, 8);
+      g.fillStyle(0xffffff, 0.35);
+      g.fillCircle(15, 8, 4);
+
+      g.fillStyle(0xffffff, 1);
+      g.fillCircle(14, 9, 2.5);
+      g.fillCircle(20, 9, 2.5);
+      g.fillStyle(0x222222, 1);
+      g.fillCircle(14, 10, 1.4);
+      g.fillCircle(20, 10, 1.4);
+      g.fillStyle(0xffffff, 1);
+      g.fillCircle(15, 9, 0.7);
+      g.fillCircle(21, 9, 0.7);
+
+      g.generateTexture(texKey, 34, 36);
+      g.destroy();
+    }
+  }
+
+  _createPlayerSprite(p) {
+    this._ensureCharacterTextures();
+
+    const baseKey = 'char_base_' + p.color.replace('#', '');
+
+    const glow = this.add.image(0, 0, baseKey)
       .setOrigin(0.5)
       .setBlendMode(Phaser.BlendModes.ADD)
       .setAlpha(0.55)
-      .setScale(1.25)
+      .setScale(1.15)
       .setVisible(false);
 
-    const body = this.add.image(p.x, p.y, texKey).setDepth(5).setOrigin(0.5);
+    const base = this.add.image(0, 0, baseKey).setOrigin(0.5);
+
+    const gun = this.add.image(0, 0, 'char_gun')
+      .setOrigin(0, 0.5)
+      .setTint(0x333333);
+
+    const container = this.add.container(p.x, p.y, [glow, base, gun]).setDepth(5);
+
+    const gunBaseX = 8;
+    const gunBaseY = 4;
+    gun.setPosition(gunBaseX, gunBaseY);
+
     const isOwn = p.id === this.playerId;
     const label = this.add.text(p.x, p.y - 26, isOwn ? 'YOU' : p.id.slice(0, 6), {
       fontSize: '10px',
@@ -296,7 +347,8 @@ export class GameScene extends Phaser.Scene {
       strokeThickness: 2,
       fontStyle: isOwn ? 'bold' : 'normal'
     }).setOrigin(0.5).setDepth(6);
-    this.playerSprites.set(p.id, { body, glow, label, baseY: p.y });
+
+    this.playerSprites.set(p.id, { container, glow, base, gun, gunBaseX, gunBaseY, label, baseY: p.y });
     this.playerData.set(p.id, p);
   }
 
@@ -336,7 +388,7 @@ export class GameScene extends Phaser.Scene {
 
   _removePlayer(id) {
     const s = this.playerSprites.get(id);
-    if (s) { s.body.destroy(); s.glow?.destroy(); s.label.destroy(); }
+    if (s) { s.container.destroy(); s.label.destroy(); }
     this.playerSprites.delete(id);
     this.spray.remove(id);
   }
