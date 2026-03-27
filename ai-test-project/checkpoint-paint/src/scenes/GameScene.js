@@ -218,7 +218,12 @@ export class GameScene extends Phaser.Scene {
     // Walking bobble for all player sprites
     for (const [id, s] of this.playerSprites) {
       const baseY = s.baseY ?? s.body.y;
-      s.body.y = baseY + Math.sin(time * 0.008) * 2;
+      const bob = Math.sin(time * 0.008) * 2;
+      s.body.y = baseY + bob;
+      if (s.glow) {
+        s.glow.y = baseY + bob;
+        if (s.glow.visible) s.glow.setScale(1.25 + Math.sin(time * 0.01) * 0.05);
+      }
     }
   }
 
@@ -274,6 +279,14 @@ export class GameScene extends Phaser.Scene {
       g.destroy();
     }
 
+    const glow = this.add.image(p.x, p.y, texKey)
+      .setDepth(4)
+      .setOrigin(0.5)
+      .setBlendMode(Phaser.BlendModes.ADD)
+      .setAlpha(0.55)
+      .setScale(1.25)
+      .setVisible(false);
+
     const body = this.add.image(p.x, p.y, texKey).setDepth(5).setOrigin(0.5);
     const isOwn = p.id === this.playerId;
     const label = this.add.text(p.x, p.y - 26, isOwn ? 'YOU' : p.id.slice(0, 6), {
@@ -283,7 +296,7 @@ export class GameScene extends Phaser.Scene {
       strokeThickness: 2,
       fontStyle: isOwn ? 'bold' : 'normal'
     }).setOrigin(0.5).setDepth(6);
-    this.playerSprites.set(p.id, { body, label, baseY: p.y });
+    this.playerSprites.set(p.id, { body, glow, label, baseY: p.y });
     this.playerData.set(p.id, p);
   }
 
@@ -323,7 +336,7 @@ export class GameScene extends Phaser.Scene {
 
   _removePlayer(id) {
     const s = this.playerSprites.get(id);
-    if (s) { s.body.destroy(); s.label.destroy(); }
+    if (s) { s.body.destroy(); s.glow?.destroy(); s.label.destroy(); }
     this.playerSprites.delete(id);
     this.spray.remove(id);
   }

@@ -126,8 +126,8 @@ export class GameRoom {
 
     // update ink + score
     for (const p of allPlayers) {
-      const onOwn = this.map.getOwner(p.tileX(), p.tileY()) === p.colorIndex;
-      p.updateInk(onOwn, this.map);
+      p.updateZone(this.map);
+      p.updateInk();
       p.score = this.map.countTiles(p.colorIndex);
     }
 
