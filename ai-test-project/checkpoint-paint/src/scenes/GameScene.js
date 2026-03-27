@@ -33,6 +33,7 @@ export class GameScene extends Phaser.Scene {
     this.colorIndexByHex = {};
     this.localInk = 100;
     this._lastCountdown = 0;
+    this._inkBlinkTween = null;
 
     this.network = new NetworkManager(this);
     this.spray = new SprayEffect(this);
@@ -133,7 +134,8 @@ export class GameScene extends Phaser.Scene {
 
       if (p.alive) {
         sprites.container.setVisible(true);
-        sprites.container.setAlpha(1);
+        const keepTweenAlpha = p.id === this.playerId && this._inkBlinkTween;
+        if (!keepTweenAlpha) sprites.container.setAlpha(1);
       } else if (sprites.container.visible) {
         sprites.container.setAlpha(0.2);
       }
@@ -173,6 +175,27 @@ export class GameScene extends Phaser.Scene {
         this.cameras.main.centerOn(sprites.container.x, sprites.container.y);
         this.localInk = p.ink;
         this.events.emit('ink_update', p.ink);
+
+        const shouldBlink = p.alive && (p.ink ?? 0) < 20;
+        if (shouldBlink && !this._inkBlinkTween) {
+          sprites.container.setAlpha(1);
+          this._inkBlinkTween = this.tweens.add({
+            targets: sprites.container,
+            alpha: 0.35,
+            duration: 140,
+            yoyo: true,
+            repeat: -1
+          });
+        } else if (!shouldBlink && this._inkBlinkTween) {
+          this._inkBlinkTween.stop();
+          this._inkBlinkTween.remove();
+          this._inkBlinkTween = null;
+          sprites.container.setAlpha(p.alive ? 1 : 0.2);
+          if (p.alive) {
+            sprites.base.clearTint();
+            sprites.gun.clearTint();
+          }
+        }
       }
     }
   }
