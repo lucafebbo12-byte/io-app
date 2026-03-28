@@ -3,7 +3,7 @@ import { TILE_SIZE, PLAYER_COLORS, WALL_OWNER_INDEX, WALL_COLOR } from '../../sh
 import { NetworkManager } from '../systems/NetworkManager.js';
 import { TerritoryMap } from '../systems/TerritoryMap.js';
 import { SprayEffect } from '../systems/SprayEffect.js';
-import { createJoysticks, readJoysticks, PLUGIN_KEY } from '../systems/JoystickInput.js';
+import { createJoysticks, readJoysticksSafe, PLUGIN_KEY } from '../systems/JoystickInput.js';
 
 export class GameScene extends Phaser.Scene {
   constructor() { super({ key: 'GameScene' }); }
@@ -19,7 +19,24 @@ export class GameScene extends Phaser.Scene {
     // Checkpoint icon (white star)
     const star = this.make.graphics({ add: false });
     star.fillStyle(0xffffff, 1);
-    star.fillStar(10, 10, 5, 4, 9);
+    // Manual star path (avoid Phaser versions without fillStar)
+    const cx = 10;
+    const cy = 10;
+    const points = 5;
+    const inner = 4;
+    const outer = 9;
+    const step = Math.PI / points;
+    star.beginPath();
+    for (let i = 0; i < points * 2; i++) {
+      const radius = (i % 2 === 0) ? outer : inner;
+      const angle = (i * step) - Math.PI / 2;
+      const x = cx + Math.cos(angle) * radius;
+      const y = cy + Math.sin(angle) * radius;
+      if (i === 0) star.moveTo(x, y);
+      else star.lineTo(x, y);
+    }
+    star.closePath();
+    star.fillPath();
     star.generateTexture('checkpoint_star', 20, 20);
     star.destroy();
   }
@@ -34,6 +51,10 @@ export class GameScene extends Phaser.Scene {
     this.localInk = 100;
     this._lastCountdown = 0;
     this._inkBlinkTween = null;
+    this._lastPointerMoveAt = 0;
+    this._useMouseAim = false;
+    this._nextInputDebugAt = 0;
+    this._loggedWasdPress = false;
 
     this.network = new NetworkManager(this);
     this.spray = new SprayEffect(this);
@@ -55,6 +76,44 @@ export class GameScene extends Phaser.Scene {
     this.countdownText = this.add.text(this.scale.width / 2, this.scale.height * 0.35, '', {
       fontSize: '72px', color: '#ffffff', stroke: '#000', strokeThickness: 6
     }).setOrigin(0.5).setScrollFactor(0).setDepth(30).setAlpha(0);
+
+    // Force canvas focus so WASD works immediately without clicking
+    this.game.canvas.setAttribute('tabindex', '0');
+    this.game.canvas.focus();
+
+    // Keyboard + mouse controls (desktop)
+    this.keys = this.input.keyboard?.addKeys('W,A,S,D');
+    this.input.keyboard.enabled = true;
+    this.input.keyboard?.addCapture([
+      Phaser.Input.Keyboard.KeyCodes.W,
+      Phaser.Input.Keyboard.KeyCodes.A,
+      Phaser.Input.Keyboard.KeyCodes.S,
+      Phaser.Input.Keyboard.KeyCodes.D
+    ]);
+    this.input.keyboard?.on('keydown', (event) => {
+      if (this._loggedWasdPress) return;
+      if (['KeyW', 'KeyA', 'KeyS', 'KeyD'].includes(event.code)) {
+        console.log('[Input Debug] WASD key captured by Phaser keyboard manager');
+        this._loggedWasdPress = true;
+      }
+    });
+    this.pointerAimAngle = 0;
+    this.pointerSpraying = false;
+    this.input.on('pointerdown', () => { this.pointerSpraying = true; });
+    this.input.on('pointerup', () => { this.pointerSpraying = false; });
+    this.input.on('pointermove', (pointer) => {
+      const sprites = this.playerSprites.get(this.playerId);
+      if (!sprites) return;
+      const worldPoint = pointer.positionToCamera(this.cameras.main);
+      this.pointerAimAngle = Phaser.Math.Angle.Between(
+        sprites.container.x,
+        sprites.container.y,
+        worldPoint.x,
+        worldPoint.y
+      );
+      this._lastPointerMoveAt = this.time.now;
+      this._useMouseAim = true;
+    });
   }
 
   // ─── Network callbacks ─────────────────────────────────────────────────────
@@ -66,7 +125,7 @@ export class GameScene extends Phaser.Scene {
 
     // Build color lookup: colorIndex → hex
     const colorMap = {};
-    colorMap[0] = '#1a1a2e'; // neutral
+    colorMap[0] = '#23233a'; // neutral arena floor
     PLAYER_COLORS.forEach((c, i) => {
       colorMap[i + 1] = c;
       this.colorIndexByHex[c] = i + 1;
@@ -80,7 +139,8 @@ export class GameScene extends Phaser.Scene {
     const worldW = mapW * tileSize;
     const worldH = mapH * tileSize;
     this.cameras.main.setBounds(0, 0, worldW, worldH);
-    this.cameras.main.setZoom(2);
+    this.cameras.main.setZoom(1.6); // show more of the blob map
+    this.cameras.main.setBackgroundColor('#111118');
 
     this._ensureCharacterTextures();
 
@@ -263,9 +323,34 @@ export class GameScene extends Phaser.Scene {
     if (playerId === this.playerId) this._showMsg('☠️ You are eliminated!');
   }
 
+  onCheckpointDamaged({ playerId, hp, maxHp }) {
+    const s = this.checkpointSprites.get(playerId);
+    if (!s) return;
+    const pct = Math.max(0, hp / maxHp);
+    this._redrawHpRing(s.hpRing, s.px, s.py, pct, s.colorInt);
+    if (playerId === this.playerId) this.cameras.main.shake(60, 0.006);
+  }
+
   onCheckpointDestroyed({ playerId }) {
     const s = this.checkpointSprites.get(playerId);
-    if (s) { s.destroy(); this.checkpointSprites.delete(playerId); }
+    if (s) {
+      const p = this.playerData.get(playerId);
+      const burst = this.add.particles(s.px, s.py, 'dot', {
+        speed: { min: 130, max: 360 },
+        scale: { start: 1.5, end: 0 },
+        lifespan: 750,
+        tint: s.colorInt,
+        emitting: false
+      });
+      burst.setDepth(9);
+      burst.explode(40, s.px, s.py);
+      this.time.delayedCall(900, () => burst.destroy());
+      if (playerId === this.playerId) this.cameras.main.shake(320, 0.022);
+      s.baseGfx?.destroy();
+      s.hpRing?.destroy();
+      s.star?.destroy();
+      this.checkpointSprites.delete(playerId);
+    }
     const p = this.playerData.get(playerId);
     if (p) this._showMsg(`🏳️ ${playerId === this.playerId ? 'Your' : 'A'} checkpoint destroyed!`);
     this.events.emit('checkpoint_feed', { playerId });
@@ -280,8 +365,37 @@ export class GameScene extends Phaser.Scene {
   // ─── Update ────────────────────────────────────────────────────────────────
 
   update(time) {
-    if (!this.playerId || !this.moveStick) return;
-    const input = readJoysticks(this.moveStick, this.aimStick);
+    if (!this.playerId) return;
+    const input = readJoysticksSafe(this.moveStick, this.aimStick, this.pointerAimAngle || 0);
+
+    // Keyboard movement override (WASD)
+    let kbDx = 0;
+    let kbDy = 0;
+    if (this.keys) {
+      if (this.keys.A?.isDown) kbDx -= 1;
+      if (this.keys.D?.isDown) kbDx += 1;
+      if (this.keys.W?.isDown) kbDy -= 1;
+      if (this.keys.S?.isDown) kbDy += 1;
+    }
+    if (kbDx !== 0 || kbDy !== 0) {
+      const len = Math.hypot(kbDx, kbDy) || 1;
+      input.dx = kbDx / len;
+      input.dy = kbDy / len;
+      if (this.time.now >= this._nextInputDebugAt) {
+        this._nextInputDebugAt = this.time.now + 800;
+        console.log(
+          `[Input Debug] WASD vector dx=${input.dx.toFixed(2)} dy=${input.dy.toFixed(2)}`
+        );
+      }
+    }
+
+    // Mouse aim + click to spray (desktop)
+    const now = this.time.now;
+    const recentMouse = this._useMouseAim && (now - this._lastPointerMoveAt < 800);
+    if (recentMouse) {
+      input.aimAngle = this.pointerAimAngle;
+      input.spraying = this.pointerSpraying;
+    }
     this.network.sendInput(input);
 
     const local = this.playerData.get(this.playerId);
@@ -303,8 +417,8 @@ export class GameScene extends Phaser.Scene {
     this.aimCone.clear();
     const canSpray = !!sprites && !!local?.alive && input.spraying && (local?.ink ?? this.localInk ?? 100) > 0;
     if (canSpray) {
-      const range = 60;
-      const tipWidth = 28;
+      const range = 90;   // longer visible arc
+      const tipWidth = 70; // wider to match 50° cone
       const px = sprites.container.x;
       const py = sprites.container.y;
       const a = input.aimAngle;
@@ -430,8 +544,12 @@ export class GameScene extends Phaser.Scene {
   _createCheckpointSprite(c) {
     const owner = this.playerData.get(c.ownerId);
     const ownerIndex = this.colorIndexByHex[owner?.color] ?? 1;
+    const colorInt = parseInt((owner?.color ?? '#ffffff').replace('#', ''), 16);
 
-    // 5x5 base zone in owner's color (drawn into the territory render texture)
+    const px = (c.tileX + 0.5) * this.tileSize;
+    const py = (c.tileY + 0.5) * this.tileSize;
+
+    // Paint base tile zone (5x5) into the territory render texture
     const baseTiles = [];
     for (let dy = -2; dy <= 2; dy++) {
       for (let dx = -2; dx <= 2; dx++) {
@@ -440,25 +558,59 @@ export class GameScene extends Phaser.Scene {
     }
     this.territory?.applyDelta(baseTiles);
 
-    // Big star icon on top (separate sprite so we can remove it)
-    const px = (c.tileX + 0.5) * this.tileSize;
-    const py = (c.tileY + 0.5) * this.tileSize;
+    // ── Dye Hard–style base ─────────────────────────────────────────
+    // Outer shadow
+    const baseGfx = this.add.graphics().setDepth(2);
+    baseGfx.fillStyle(0x000000, 0.45);
+    baseGfx.fillCircle(px + 2, py + 3, 22);
+    // Base circle in team color
+    baseGfx.fillStyle(colorInt, 1);
+    baseGfx.fillCircle(px, py, 21);
+    // Inner dark ring
+    baseGfx.fillStyle(0x000000, 0.35);
+    baseGfx.fillCircle(px, py, 13);
+    // Highlight glint (top-left)
+    baseGfx.fillStyle(0xffffff, 0.28);
+    baseGfx.fillCircle(px - 6, py - 6, 7);
+
+    // HP arc ring (outer ring showing health)
+    const hpRing = this.add.graphics().setDepth(3);
+    this._redrawHpRing(hpRing, px, py, 1.0, colorInt);
+
+    // Center star icon
     const star = this.add.image(px, py, 'checkpoint_star')
-      .setDepth(2)
-      .setScale(1.4)
+      .setDepth(4)
+      .setScale(0.9)
       .setAlpha(0.95)
-      .setTint(parseInt((owner?.color ?? '#ffffff').replace('#', ''), 16));
-    // Pulse animation
+      .setTint(0xffffff);
     this.tweens.add({
       targets: star,
-      scaleX: 1.8, scaleY: 1.8,
+      scaleX: 1.1, scaleY: 1.1,
       alpha: 0.7,
-      duration: 900,
-      yoyo: true,
-      repeat: -1,
+      duration: 1100,
+      yoyo: true, repeat: -1,
       ease: 'Sine.easeInOut'
     });
-    this.checkpointSprites.set(c.ownerId, star);
+
+    this.checkpointSprites.set(c.ownerId, { baseGfx, hpRing, star, px, py, colorInt });
+  }
+
+  _redrawHpRing(gfx, cx, cy, pct, colorInt) {
+    gfx.clear();
+    // Background ring (dark)
+    gfx.lineStyle(5, 0x000000, 0.6);
+    gfx.beginPath();
+    gfx.arc(cx, cy, 25, 0, Math.PI * 2, false);
+    gfx.strokePath();
+    // HP fill arc (team color → orange → red)
+    if (pct > 0) {
+      const col = pct > 0.5 ? colorInt : pct > 0.25 ? 0xff8800 : 0xff2222;
+      gfx.lineStyle(4, col, 1);
+      gfx.beginPath();
+      const end = -Math.PI / 2 + Math.PI * 2 * Math.min(pct, 1);
+      gfx.arc(cx, cy, 25, -Math.PI / 2, end, false);
+      gfx.strokePath();
+    }
   }
 
   _removePlayer(id) {

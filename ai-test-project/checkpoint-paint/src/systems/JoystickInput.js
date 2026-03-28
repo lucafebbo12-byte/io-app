@@ -30,6 +30,10 @@ export function createJoysticks(scene) {
 }
 
 export function readJoysticks(moveStick, aimStick) {
+  if (!moveStick || !aimStick) {
+    return { dx: 0, dy: 0, aimAngle: 0, spraying: false };
+  }
+
   const dx = moveStick.forceX / 60;
   const dy = moveStick.forceY / 60;
 
@@ -41,4 +45,11 @@ export function readJoysticks(moveStick, aimStick) {
   }
 
   return { dx, dy, aimAngle, spraying };
+}
+
+export function readJoysticksSafe(moveStick, aimStick, fallbackAim = 0) {
+  if (!moveStick || !aimStick) {
+    return { dx: 0, dy: 0, aimAngle: fallbackAim, spraying: false };
+  }
+  return readJoysticks(moveStick, aimStick);
 }
