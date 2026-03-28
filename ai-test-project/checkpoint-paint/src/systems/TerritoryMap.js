@@ -1,4 +1,3 @@
-import Phaser from 'phaser';
 import { TILE_SIZE } from '../../shared/constants.js';
 
 export class TerritoryMap {
@@ -10,31 +9,15 @@ export class TerritoryMap {
 
     this._animOriginX = null;
     this._animOriginY = null;
-    this.useSmoothPaint = true;
-    this.showTileFallback = false;
-    this.maxStampsPerFrame = 500;
-    this._stampQueue = [];
 
     // Off-screen render texture for the full territory grid
     this.rt = scene.add
       .renderTexture(0, 0, mapW * TILE_SIZE, mapH * TILE_SIZE)
       .setOrigin(0, 0)
       .setDepth(0);
-    this.rt.setVisible(this.showTileFallback);
-
-    // Smooth visual paint layer (separate from logical tile ownership renderer)
-    this.smoothPaintRT = scene.add
-      .renderTexture(0, 0, mapW * TILE_SIZE, mapH * TILE_SIZE)
-      .setOrigin(0, 0)
-      .setDepth(0.5);
 
     this._tileKeyByOwner = {};
     this._ensureTileTextures();
-    this._ensureBrushTexture();
-    this._ownerTintByIndex = {};
-    for (const [idxStr, hex] of Object.entries(colors)) {
-      this._ownerTintByIndex[Number(idxStr)] = parseInt(hex.replace('#', ''), 16);
-    }
 
     // Splat pool (short-lived additive images on top of rt)
     this._splatPool = [];
@@ -64,40 +47,26 @@ export class TerritoryMap {
       const g = this.scene.make.graphics({ add: false });
       const base = parseInt(hex.replace('#', ''), 16);
 
-      if (idx === 255) {
-        // Void / wall tile — near-black, no shine, blends with canvas background
-        g.fillStyle(0x111118, 1);
+      if (idx === 0) {
+        // Neutral tile: dark grid look
+        g.fillStyle(0x0d0d1a, 1);
         g.fillRect(0, 0, TILE_SIZE, TILE_SIZE);
-
-      } else if (idx === 0) {
-        // Neutral arena floor: dark blue-grey with 1-px grid lines
-        g.fillStyle(0x23233a, 1);
-        g.fillRect(0, 0, TILE_SIZE, TILE_SIZE);
-        g.lineStyle(1, 0x2e2e4a, 0.8);
+        g.lineStyle(1, 0x1e1e2e, 0.8);
         g.beginPath();
-        g.moveTo(TILE_SIZE - 1, 0);
-        g.lineTo(TILE_SIZE - 1, TILE_SIZE);
-        g.moveTo(0, TILE_SIZE - 1);
-        g.lineTo(TILE_SIZE, TILE_SIZE - 1);
+        g.moveTo(0, 0);
+        g.lineTo(TILE_SIZE, 0);
+        g.moveTo(0, 0);
+        g.lineTo(0, TILE_SIZE);
         g.strokePath();
-
       } else {
-        // ── Dye Hard–style glossy paint tile ──────────────────────────
-        // 1. Dark "grout" background (1 px gap between tiles)
-        g.fillStyle(0x111118, 1);
-        g.fillRect(0, 0, TILE_SIZE, TILE_SIZE);
-
-        // 2. Main color fill (inset 0.5 px so grout shows on all edges)
         g.fillStyle(base, 1);
-        g.fillRect(0.5, 0.5, TILE_SIZE - 1, TILE_SIZE - 1);
+        g.fillRect(0, 0, TILE_SIZE, TILE_SIZE);
+      }
 
-        // 3. Top-left highlight (Dye Hard specular look, 55% white)
-        g.fillStyle(0xffffff, 0.55);
-        g.fillTriangle(0.5, 0.5, TILE_SIZE - 0.5, 0.5, 0.5, TILE_SIZE - 0.5);
-
-        // 4. Bottom-right shadow (20% black for depth)
-        g.fillStyle(0x000000, 0.20);
-        g.fillTriangle(TILE_SIZE - 0.5, 0.5, TILE_SIZE - 0.5, TILE_SIZE - 0.5, 0.5, TILE_SIZE - 0.5);
+      // Shine triangle (skip for neutral)
+      if (idx !== 0) {
+        g.fillStyle(0xffffff, idx === 255 ? 0.18 : 0.35);
+        g.fillTriangle(0, 0, TILE_SIZE, 0, 0, TILE_SIZE);
       }
 
       g.generateTexture(key, TILE_SIZE, TILE_SIZE);
@@ -105,39 +74,7 @@ export class TerritoryMap {
     }
   }
 
-  _ensureBrushTexture() {
-    const key = 'brush_soft';
-    if (this.scene.textures.exists(key)) return;
-    const radius = 24;
-    const size = radius * 2;
-    const g = this.scene.make.graphics({ add: false });
-    for (let i = radius; i > 0; i -= 2) {
-      const alpha = (i / radius) * 0.92;
-      g.fillStyle(0xffffff, alpha);
-      g.fillCircle(radius, radius, i);
-    }
-    g.generateTexture(key, size, size);
-    g.destroy();
-  }
-
-  _stampSmooth(owner, worldX, worldY, alpha) {
-    if (owner === 0 || owner === 255) return;
-    const tint = this._ownerTintByIndex[owner] ?? 0xffffff;
-    const jitterX = Phaser.Math.Between(-2, 2);
-    const jitterY = Phaser.Math.Between(-2, 2);
-    const scale = Phaser.Math.FloatBetween(0.85, 1.15);
-    this.smoothPaintRT.draw(
-      'brush_soft',
-      worldX + jitterX,
-      worldY + jitterY,
-      alpha,
-      tint,
-      scale,
-      scale
-    );
-  }
-
-  _drawTiles(tiles, ownerOverride = null, animate = false, predictedAlpha = 0.6) {
+  _drawTiles(tiles, ownerOverride = null, animate = false) {
     const cam = this.scene.cameras.main;
     const view = cam.worldView;
     const margin = 100;
@@ -153,24 +90,12 @@ export class TerritoryMap {
       const key = this._tileKeyByOwner[owner] ?? this._tileKeyByOwner[0];
       const x = t.x * TILE_SIZE;
       const y = t.y * TILE_SIZE;
-      const cx = x + TILE_SIZE * 0.5;
-      const cy = y + TILE_SIZE * 0.5;
-      const inView =
-        cx >= view.x - margin &&
-        cy >= view.y - margin &&
-        cx <= view.right + margin &&
-        cy <= view.bottom + margin;
-
-      if (!this.useSmoothPaint || this.showTileFallback) {
-        this.rt.draw(key, x, y);
-      }
-
-      if (this.useSmoothPaint && inView) {
-        const alpha = ownerOverride !== null ? predictedAlpha : 1.0;
-        this._stampQueue.push({ owner, x: cx, y: cy, alpha });
-      }
+      this.rt.draw(key, x, y);
 
       if (!animate) continue;
+
+      const cx = x + TILE_SIZE * 0.5;
+      const cy = y + TILE_SIZE * 0.5;
 
       // Only animate tiles near local player, and only near camera view.
       if (hasOrigin) {
@@ -181,20 +106,16 @@ export class TerritoryMap {
         continue;
       }
 
-      if (!inView) continue;
+      if (
+        cx < view.x - margin ||
+        cy < view.y - margin ||
+        cx > view.right + margin ||
+        cy > view.bottom + margin
+      ) {
+        continue;
+      }
 
       this._spawnSplat(key, x, y);
-    }
-
-    if (this.useSmoothPaint) this._flushStampQueue();
-  }
-
-  _flushStampQueue() {
-    let budget = this.maxStampsPerFrame;
-    while (budget > 0 && this._stampQueue.length > 0) {
-      const s = this._stampQueue.shift();
-      this._stampSmooth(s.owner, s.x, s.y, s.alpha);
-      budget--;
     }
   }
 
