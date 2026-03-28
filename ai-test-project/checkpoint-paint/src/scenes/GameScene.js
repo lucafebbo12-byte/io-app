@@ -71,10 +71,6 @@ export class GameScene extends Phaser.Scene {
 
     // Aim cone indicator (spray arc)
     this.aimCone = this.add.graphics().setDepth(4).setVisible(false);
-    this.nozzleFlash = this.add.circle(0, 0, 4, 0xffffff, 0.9)
-      .setDepth(6)
-      .setBlendMode(Phaser.BlendModes.ADD)
-      .setVisible(false);
 
     // Countdown text
     this.countdownText = this.add.text(this.scale.width / 2, this.scale.height * 0.35, '', {
@@ -332,7 +328,6 @@ export class GameScene extends Phaser.Scene {
     if (!s) return;
     const pct = Math.max(0, hp / maxHp);
     this._redrawHpRing(s.hpRing, s.px, s.py, pct, s.colorInt);
-    this._updateCheckpointDamageVisual(s, pct);
     if (playerId === this.playerId) this.cameras.main.shake(60, 0.006);
   }
 
@@ -351,11 +346,8 @@ export class GameScene extends Phaser.Scene {
       burst.explode(40, s.px, s.py);
       this.time.delayedCall(900, () => burst.destroy());
       if (playerId === this.playerId) this.cameras.main.shake(320, 0.022);
-      s.baseHalo?.destroy();
       s.baseGfx?.destroy();
       s.hpRing?.destroy();
-      s.crack?.destroy();
-      s.leak?.destroy();
       s.star?.destroy();
       this.checkpointSprites.delete(playerId);
     }
@@ -376,6 +368,7 @@ export class GameScene extends Phaser.Scene {
     if (!this.playerId) return;
     const input = readJoysticksSafe(this.moveStick, this.aimStick, this.pointerAimAngle || 0);
 
+    // Keyboard movement override (WASD)
     let kbDx = 0;
     let kbDy = 0;
     if (this.keys) {
@@ -390,10 +383,13 @@ export class GameScene extends Phaser.Scene {
       input.dy = kbDy / len;
       if (this.time.now >= this._nextInputDebugAt) {
         this._nextInputDebugAt = this.time.now + 800;
-        console.log(`[Input Debug] WASD vector dx=${input.dx.toFixed(2)} dy=${input.dy.toFixed(2)}`);
+        console.log(
+          `[Input Debug] WASD vector dx=${input.dx.toFixed(2)} dy=${input.dy.toFixed(2)}`
+        );
       }
     }
 
+    // Mouse aim + click to spray (desktop)
     const now = this.time.now;
     const recentMouse = this._useMouseAim && (now - this._lastPointerMoveAt < 800);
     if (recentMouse) {
@@ -417,52 +413,30 @@ export class GameScene extends Phaser.Scene {
       );
     }
 
+    // Spray arc cone indicator
     this.aimCone.clear();
     const canSpray = !!sprites && !!local?.alive && input.spraying && (local?.ink ?? this.localInk ?? 100) > 0;
     if (canSpray) {
-      const range = 92;
-      const halfAngle = Phaser.Math.DegToRad(25);
+      const range = 90;   // longer visible arc
+      const tipWidth = 70; // wider to match 50° cone
       const px = sprites.container.x;
       const py = sprites.container.y;
       const a = input.aimAngle;
-      const leftA = a - halfAngle;
-      const rightA = a + halfAngle;
-      const lx = px + Math.cos(leftA) * range;
-      const ly = py + Math.sin(leftA) * range;
-      const rx = px + Math.cos(rightA) * range;
-      const ry = py + Math.sin(rightA) * range;
-      const mx = px + Math.cos(a) * (range * 0.75);
-      const my = py + Math.sin(a) * (range * 0.75);
+      const tx = px + Math.cos(a) * range;
+      const ty = py + Math.sin(a) * range;
+      const perpX = -Math.sin(a) * (tipWidth / 2);
+      const perpY = Math.cos(a) * (tipWidth / 2);
+
       const colorInt = parseInt(String(local?.color ?? '#ffffff').replace('#', ''), 16);
-
       this.aimCone.setVisible(true);
-      this.aimCone.fillStyle(colorInt, 0.18);
-      this.aimCone.fillTriangle(px, py, lx, ly, rx, ry);
-      this.aimCone.fillStyle(colorInt, 0.1);
-      this.aimCone.fillTriangle(px, py, lx, ly, mx, my);
-      this.aimCone.fillTriangle(px, py, mx, my, rx, ry);
-      this.aimCone.lineStyle(2, colorInt, 0.55);
-      this.aimCone.beginPath();
-      this.aimCone.moveTo(px, py);
-      this.aimCone.lineTo(lx, ly);
-      this.aimCone.moveTo(px, py);
-      this.aimCone.lineTo(rx, ry);
-      this.aimCone.strokePath();
-      this.aimCone.lineStyle(2, colorInt, 0.4);
-      this.aimCone.beginPath();
-      this.aimCone.arc(px, py, range, leftA, rightA, false);
-      this.aimCone.strokePath();
-
-      this.nozzleFlash.setVisible(true);
-      this.nozzleFlash.setFillStyle(0xffffff, 0.75 + Math.random() * 0.2);
-      this.nozzleFlash.setRadius(3 + Math.random() * 2);
-      this.nozzleFlash.setPosition(px + Math.cos(a) * 10, py + Math.sin(a) * 10);
+      this.aimCone.fillStyle(colorInt, 0.25);
+      this.aimCone.fillTriangle(px, py, tx + perpX, ty + perpY, tx - perpX, ty - perpY);
     } else {
       this.aimCone.setVisible(false);
-      this.nozzleFlash.setVisible(false);
     }
 
-    for (const [, s] of this.playerSprites) {
+    // Walking bobble for all player sprites
+    for (const [id, s] of this.playerSprites) {
       const baseY = s.baseY ?? s.container.y;
       const bob = Math.sin(time * 0.008) * 2;
       s.container.y = baseY + bob;
@@ -584,12 +558,6 @@ export class GameScene extends Phaser.Scene {
     }
     this.territory?.applyDelta(baseTiles);
 
-    const baseHalo = this.add.graphics().setDepth(1.8);
-    baseHalo.fillStyle(colorInt, 0.17);
-    baseHalo.fillCircle(px, py, 33);
-    baseHalo.lineStyle(2, colorInt, 0.3);
-    baseHalo.strokeCircle(px, py, 33);
-
     // ── Dye Hard–style base ─────────────────────────────────────────
     // Outer shadow
     const baseGfx = this.add.graphics().setDepth(2);
@@ -608,8 +576,6 @@ export class GameScene extends Phaser.Scene {
     // HP arc ring (outer ring showing health)
     const hpRing = this.add.graphics().setDepth(3);
     this._redrawHpRing(hpRing, px, py, 1.0, colorInt);
-    const crack = this.add.graphics().setDepth(3.2).setAlpha(0);
-    const leak = this.add.graphics().setDepth(3.1).setAlpha(0);
 
     // Center star icon
     const star = this.add.image(px, py, 'checkpoint_star')
@@ -626,7 +592,7 @@ export class GameScene extends Phaser.Scene {
       ease: 'Sine.easeInOut'
     });
 
-    this.checkpointSprites.set(c.ownerId, { baseHalo, baseGfx, hpRing, crack, leak, star, px, py, colorInt });
+    this.checkpointSprites.set(c.ownerId, { baseGfx, hpRing, star, px, py, colorInt });
   }
 
   _redrawHpRing(gfx, cx, cy, pct, colorInt) {
@@ -644,41 +610,6 @@ export class GameScene extends Phaser.Scene {
       const end = -Math.PI / 2 + Math.PI * 2 * Math.min(pct, 1);
       gfx.arc(cx, cy, 25, -Math.PI / 2, end, false);
       gfx.strokePath();
-    }
-  }
-
-  _updateCheckpointDamageVisual(s, pct) {
-    if (!s?.crack || !s?.leak) return;
-
-    const damage = Phaser.Math.Clamp(1 - pct, 0, 1);
-    const crackAlpha = damage > 0.25 ? 0.25 + damage * 0.5 : 0;
-    const leakAlpha = damage > 0.45 ? 0.2 + damage * 0.6 : 0;
-
-    s.crack.clear();
-    s.crack.lineStyle(2, 0x111111, crackAlpha);
-    s.crack.beginPath();
-    s.crack.moveTo(s.px - 10, s.py - 3);
-    s.crack.lineTo(s.px - 2, s.py + 2);
-    s.crack.lineTo(s.px + 4, s.py - 4);
-    s.crack.lineTo(s.px + 10, s.py + 6);
-    s.crack.moveTo(s.px - 6, s.py + 8);
-    s.crack.lineTo(s.px + 2, s.py + 12);
-    s.crack.strokePath();
-    s.crack.setAlpha(crackAlpha);
-
-    s.leak.clear();
-    s.leak.fillStyle(s.colorInt, leakAlpha);
-    s.leak.fillEllipse(s.px - 8, s.py + 20, 8, 12);
-    s.leak.fillEllipse(s.px + 7, s.py + 18, 7, 10);
-    s.leak.setAlpha(leakAlpha);
-
-    if (s.baseHalo) {
-      s.baseHalo.clear();
-      const haloAlpha = 0.17 + (1 - damage) * 0.1;
-      s.baseHalo.fillStyle(s.colorInt, haloAlpha);
-      s.baseHalo.fillCircle(s.px, s.py, 33);
-      s.baseHalo.lineStyle(2, s.colorInt, 0.24 + (1 - damage) * 0.12);
-      s.baseHalo.strokeCircle(s.px, s.py, 33);
     }
   }
 
