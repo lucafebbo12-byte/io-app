@@ -8,7 +8,16 @@ const config = {
   type: Phaser.AUTO,
   width: window.innerWidth,
   height: window.innerHeight,
-  backgroundColor: '#1a1a2e',
+  backgroundColor: '#111118',
+  antialias: true,
+  pixelArt: false,
+  roundPixels: false,
+  input: {
+    keyboard: true,
+    mouse: true,
+    touch: true,
+    gamepad: false
+  },
   plugins: {
     global: [{
       key: 'rexVirtualJoystick',

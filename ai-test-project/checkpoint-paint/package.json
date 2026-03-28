@@ -4,7 +4,7 @@
   "description": "Multiplayer spray-paint .io game",
   "type": "module",
   "scripts": {
-    "dev": "concurrently \"node server/index.js\" \"vite\"",
+    "dev": "concurrently \"node server/index.js\" \"vite --port 5173 --strictPort\"",
     "build": "vite build",
     "server": "node server/index.js",
     "cap:sync": "vite build && npx cap sync",

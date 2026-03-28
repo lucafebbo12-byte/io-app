@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { TILE_SIZE, PLAYER_COLORS, WALL_OWNER_INDEX, WALL_COLOR } from '../../shared/constants.js';
+import { TILE_SIZE, MAP_W, MAP_H, PLAYER_COLORS, WALL_OWNER_INDEX, WALL_COLOR, isWall } from '../../shared/constants.js';
 import { NetworkManager } from '../systems/NetworkManager.js';
 import { TerritoryMap } from '../systems/TerritoryMap.js';
 import { SprayEffect } from '../systems/SprayEffect.js';
@@ -45,6 +45,7 @@ export class GameScene extends Phaser.Scene {
     this.playerId = null;
     this.playerSprites = new Map(); // id → {body, glow, label, baseY}
     this.checkpointSprites = new Map();
+    this.bulletSprites = new Map(); // bulletId → { gfx }
     this.playerData = new Map();
     this.tileSize = TILE_SIZE;
     this.colorIndexByHex = {};
@@ -99,7 +100,16 @@ export class GameScene extends Phaser.Scene {
     });
     this.pointerAimAngle = 0;
     this.pointerSpraying = false;
-    this.input.on('pointerdown', () => { this.pointerSpraying = true; });
+    this.input.on('pointerdown', (pointer) => {
+      this.pointerSpraying = true;
+      // Left mouse click = shoot bullet
+      if (pointer.leftButtonDown()) {
+        const local = this.playerData.get(this.playerId);
+        if (!local) return;
+        const angle = Phaser.Math.Angle.Between(local.x, local.y, pointer.worldX, pointer.worldY);
+        this.network.sendShoot(angle);
+      }
+    });
     this.input.on('pointerup', () => { this.pointerSpraying = false; });
     this.input.on('pointermove', (pointer) => {
       const sprites = this.playerSprites.get(this.playerId);
@@ -114,6 +124,11 @@ export class GameScene extends Phaser.Scene {
       this._lastPointerMoveAt = this.time.now;
       this._useMouseAim = true;
     });
+
+    // HP display (scrollFixed to camera, top-left)
+    this.hpText = this.add.text(12, 44, '\u2764\u2764\u2764', {
+      fontSize: '20px', color: '#ff4444', stroke: '#000', strokeThickness: 3
+    }).setScrollFactor(0).setDepth(20);
   }
 
   // ─── Network callbacks ─────────────────────────────────────────────────────
@@ -125,7 +140,7 @@ export class GameScene extends Phaser.Scene {
 
     // Build color lookup: colorIndex → hex
     const colorMap = {};
-    colorMap[0] = '#23233a'; // neutral arena floor
+    colorMap[0] = '#3a3a3a'; // neutral arena floor (grey, Paper.io style)
     PLAYER_COLORS.forEach((c, i) => {
       colorMap[i + 1] = c;
       this.colorIndexByHex[c] = i + 1;
@@ -139,8 +154,11 @@ export class GameScene extends Phaser.Scene {
     const worldW = mapW * tileSize;
     const worldH = mapH * tileSize;
     this.cameras.main.setBounds(0, 0, worldW, worldH);
-    this.cameras.main.setZoom(1.6); // show more of the blob map
-    this.cameras.main.setBackgroundColor('#111118');
+    this.cameras.main.setZoom(2.5);
+    this.cameras.main.setBackgroundColor('#1a1a1a');
+
+    // Grey floor background (Die Hard aesthetic) — below territory at depth -2
+    this.add.rectangle(0, 0, worldW, worldH, 0x3a3a3a).setOrigin(0, 0).setDepth(-2);
 
     this._ensureCharacterTextures();
 
@@ -148,6 +166,11 @@ export class GameScene extends Phaser.Scene {
 
     const myPlayer = players.find(pp => pp.id === playerId);
     if (myPlayer?.color) this.events.emit('self_color', { color: myPlayer.color });
+    // Set initial HP display
+    if (myPlayer && this.hpText) {
+      const hp = myPlayer.hp ?? 3;
+      this.hpText.setText('\u2764'.repeat(hp));
+    }
 
     checkpoints.forEach(c => this._createCheckpointSprite(c));
 
@@ -156,15 +179,14 @@ export class GameScene extends Phaser.Scene {
     this.moveStick = moveStick;
     this.aimStick = aimStick;
 
-    this.timerText.setText(`⏱ ${timeLeft}s`);
-
-
+    this.timerText.setText(`\u23f1 ${timeLeft}s`);
+    this.timerText.setVisible(true);
   }
 
-  onDelta({ players, changedTiles, timeLeft, countdown }) {
+  onDelta({ players, changedTiles, timeLeft, countdown, bullets }) {
     this.timeLeft = timeLeft;
     this.territory?.applyDelta(changedTiles);
-    this.timerText.setText(`⏱ ${timeLeft}s`);
+    this.timerText.setText(`\u23f1 ${timeLeft}s`);
     this.events.emit('time_update', timeLeft);
 
     // Countdown display
@@ -181,6 +203,27 @@ export class GameScene extends Phaser.Scene {
       this.tweens.add({ targets: this.countdownText, alpha: 0, duration: 600, delay: 400 });
     }
 
+    // Sync bullet sprites from server delta — snap to server truth, keep velocity
+    if (bullets) {
+      const BULLET_SPEED_CLIENT = 14;
+      const serverIds = new Set(bullets.map(b => b.id));
+      for (const [id, b] of this.bulletSprites) {
+        if (!serverIds.has(id)) { b.gfx.destroy(); this.bulletSprites.delete(id); }
+      }
+      for (const bd of bullets) {
+        if (this.bulletSprites.has(bd.id)) {
+          // Snap position to authoritative server position; keep existing velocity
+          const existing = this.bulletSprites.get(bd.id);
+          existing.gfx.setPosition(bd.x, bd.y);
+        } else {
+          const gfx = this.add.rectangle(bd.x, bd.y, 3, 3, 0xffffff).setDepth(9);
+          const vx = Math.cos(bd.angle ?? 0) * BULLET_SPEED_CLIENT;
+          const vy = Math.sin(bd.angle ?? 0) * BULLET_SPEED_CLIENT;
+          this.bulletSprites.set(bd.id, { gfx, vx, vy });
+        }
+      }
+    }
+
     const top5 = [...players].sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, 5);
     this.events.emit('score_update', top5);
 
@@ -189,9 +232,11 @@ export class GameScene extends Phaser.Scene {
       const sprites = this.playerSprites.get(p.id);
       if (!sprites) { this._createPlayerSprite(p); continue; }
 
-      // Smooth lerp toward server position
-      sprites.container.x = Phaser.Math.Linear(sprites.container.x, p.x, 0.3);
-      sprites.container.y = Phaser.Math.Linear(sprites.container.y, p.y, 0.3);
+      // Frame-rate independent exponential lerp toward server position (50ms time constant)
+      const lerpDt = this.game.loop.delta;
+      const lerpT = 1 - Math.exp(-lerpDt / 50);
+      sprites.container.x = Phaser.Math.Linear(sprites.container.x, p.x, lerpT);
+      sprites.container.y = Phaser.Math.Linear(sprites.container.y, p.y, lerpT);
       sprites.baseY = sprites.container.y;
       sprites.label.setPosition(sprites.container.x, sprites.container.y - 26);
 
@@ -314,7 +359,10 @@ export class GameScene extends Phaser.Scene {
       s.container.setScale(1);
       s.container.angle = 0;
     }
-    if (playerId === this.playerId) this._showMsg('✅ Respawned!');
+    if (playerId === this.playerId) {
+      this._showMsg('Respawned!');
+      if (this.hpText) { this.hpText.setText('\u2764\u2764\u2764').setColor('#ff4444'); }
+    }
   }
 
   onPlayerEliminated({ playerId }) {
@@ -357,9 +405,56 @@ export class GameScene extends Phaser.Scene {
   }
 
   onGameOver({ winnerId, winnerColor, scores }) {
-    const msg = winnerId === this.playerId ? '🏆 YOU WIN!' : `Game Over! Winner: ${winnerId}`;
+    const msg = winnerId === this.playerId ? 'YOU WIN!' : `Game Over! Winner: ${winnerId}`;
     this._showMsg(msg, 0);
     this.time.delayedCall(4000, () => this.scene.start('WinScene', { winnerId, winnerColor, scores }));
+  }
+
+  onBulletFired(d) {
+    // Delta sync handles bullet rendering; this fires before next delta arrives.
+    // Store velocity so the update loop can extrapolate between server ticks.
+    const BULLET_SPEED_CLIENT = 14;
+    if (!this.bulletSprites.has(d.id)) {
+      const gfx = this.add.rectangle(d.x, d.y, 3, 3, 0xffffff).setDepth(9);
+      const vx = Math.cos(d.angle) * BULLET_SPEED_CLIENT;
+      const vy = Math.sin(d.angle) * BULLET_SPEED_CLIENT;
+      this.bulletSprites.set(d.id, { gfx, vx, vy });
+    }
+  }
+
+  onBulletRemoved(d) {
+    const b = this.bulletSprites.get(d.id);
+    if (b) {
+      // Impact flash: white circle that expands and fades out
+      const fx = b.gfx.x;
+      const fy = b.gfx.y;
+      b.gfx.destroy();
+      this.bulletSprites.delete(d.id);
+      const flash = this.add.circle(fx, fy, 8, 0xffffff, 1).setDepth(10);
+      this.tweens.add({
+        targets: flash,
+        alpha: 0,
+        scaleX: 2.5,
+        scaleY: 2.5,
+        duration: 120,
+        onComplete: () => flash.destroy()
+      });
+    }
+  }
+
+  onPlayerDamaged(d) {
+    // Flash the player sprite
+    const s = this.playerSprites.get(d.playerId);
+    if (s) {
+      this.tweens.add({ targets: s.container, alpha: 0.2, duration: 80, yoyo: true });
+    }
+    // Update local HP display if it's us
+    if (d.playerId === this.playerId && this.hpText) {
+      const hp = Math.max(0, d.hp);
+      this.hpText.setText('\u2764'.repeat(hp));
+      if (hp <= 1) this.hpText.setColor('#ff0000');
+      else this.hpText.setColor('#ff4444');
+    }
   }
 
   // ─── Update ────────────────────────────────────────────────────────────────
@@ -411,6 +506,16 @@ export class GameScene extends Phaser.Scene {
         ownerIndex,
         local?.ink ?? this.localInk ?? 100
       );
+    }
+
+    // Extrapolate bullet positions between server ticks (server runs at 20Hz)
+    const dt = this.game.loop.delta; // ms since last frame
+    const tickFraction = dt / (1000 / 20); // fraction of a 20Hz tick elapsed
+    for (const [, b] of this.bulletSprites) {
+      if (b.vx !== undefined) {
+        b.gfx.x += b.vx * tickFraction;
+        b.gfx.y += b.vy * tickFraction;
+      }
     }
 
     // Spray arc cone indicator

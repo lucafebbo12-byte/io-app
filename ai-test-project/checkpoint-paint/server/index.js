@@ -15,6 +15,7 @@ io.on('connection', (socket) => {
   room.addPlayer(socket);
 
   socket.on('input', (data) => room.handleInput(socket.id, data));
+  socket.on('shoot', (data) => room.handleShoot(socket.id, data));
   socket.on('disconnect', () => room.removePlayer(socket.id));
 });
 

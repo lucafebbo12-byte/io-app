@@ -16,7 +16,7 @@ export function getConeTiles(
   const seen = new Set();
   const tiles = [];
   const rayStep = TILE_SIZE;
-  const rayCount = 12;
+  const rayCount = 22; // more rays = denser coverage across the wider cone
 
   for (let i = 0; i <= rayCount; i++) {
     const angle = aimAngle - halfAngle + (2 * halfAngle * i / rayCount);
@@ -29,7 +29,7 @@ export function getConeTiles(
       const tx = Math.floor(wx / TILE_SIZE);
       const ty = Math.floor(wy / TILE_SIZE);
       if (tx < 0 || ty < 0 || tx >= mapW || ty >= mapH) break;
-      const key = tx * 1000 + ty;
+      const key = `${tx},${ty}`;
       if (!seen.has(key)) {
         seen.add(key);
         tiles.push({ x: tx, y: ty });

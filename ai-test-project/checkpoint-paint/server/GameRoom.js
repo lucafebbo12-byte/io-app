@@ -8,13 +8,17 @@ import {
   RESPAWN_DELAY,
   MAP_W,
   MAP_H,
-  CORNER_CHECKPOINTS
+  CORNER_CHECKPOINTS,
+  BULLET_DAMAGE,
+  BULLET_PAINT_RADIUS,
+  PLAYER_MAX_HP,
 } from '../shared/constants.js';
 import { Player } from './Player.js';
 import { Bot } from './Bot.js';
 import { GameMap } from './Map.js';
 import { Checkpoint } from './Checkpoint.js';
 import { getConeTiles } from './SprayCone.js';
+import { Bullet } from './Bullet.js';
 
 const TICK_MS = 1000 / TICK_RATE;
 const BROADCAST_EVERY = TICK_RATE / BROADCAST_RATE; // every 2 ticks
@@ -24,6 +28,7 @@ export class GameRoom {
     this.io = io;
     this.players = new Map(); // id -> Player
     this.checkpoints = new Map(); // playerId -> Checkpoint
+    this.bullets = new Map(); // bulletId -> Bullet
     this.map = new GameMap();
     this.initialTiles = [];
 
@@ -55,14 +60,15 @@ export class GameRoom {
   }
 
   _seedInitialMap() {
-    // Pre-paint the map into 4 quadrants using the first 4 bots' colors.
-    const quadrantOwners = [];
-    const bots = [...this.players.values()]
-      .filter(p => p.isBot)
-      .sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
-    for (let i = 0; i < 4; i++) quadrantOwners.push(bots[i]?.colorIndex ?? (i + 1));
-    this.map.seedQuadrants(quadrantOwners);
-    this.initialTiles = this.map.serializeAll();
+    // Neutral arena: map starts mostly unpainted.
+    // Each player/bot gets a small circular base zone around their spawn point.
+    const spawnZones = [...this.players.values()].map(p => ({
+      tileX: Math.floor(p.spawnX / TILE_SIZE),
+      tileY: Math.floor(p.spawnY / TILE_SIZE),
+      ownerIndex: p.colorIndex
+    }));
+    this.map.seedNeutral(spawnZones);
+    this.initialTiles = this.map.serializeBinary();
   }
 
   addPlayer(socket) {
@@ -78,7 +84,8 @@ export class GameRoom {
       mapW: MAP_W,
       mapH: MAP_H,
       tileSize: TILE_SIZE,
-      initialTiles: this.initialTiles,
+      initialTiles: this.map.serializeBinary(),
+      binaryTiles: true,
       players: this._serializePlayers(),
       checkpoints: this._serializeCheckpoints(),
       timeLeft: this.timeLeft,
@@ -96,6 +103,14 @@ export class GameRoom {
   handleInput(id, data) {
     const p = this.players.get(id);
     if (p && !p.isBot) p.applyInput(data);
+  }
+
+  handleShoot(id, data) {
+    const p = this.players.get(id);
+    if (!p || !p.alive || p.isBot) return;
+    const bullet = new Bullet(id, p.colorIndex, p.x, p.y, data.angle ?? p.aimAngle);
+    this.bullets.set(bullet.id, bullet);
+    this.io.emit('bullet_fired', bullet.serialize());
   }
 
   _step() {
@@ -120,11 +135,11 @@ export class GameRoom {
 
     // bots think only after countdown
     for (const p of allPlayers) {
-      if (p.isBot && p.alive && this.countdown <= 0) p.think(allPlayers);
+      if (p.isBot && p.alive && this.countdown <= 0) p.think(allPlayers, this.checkpoints);
     }
 
-    // move all players
-    for (const p of allPlayers) p.move();
+    // move all players (pass map for blob wall collision)
+    for (const p of allPlayers) p.move(this.map);
 
     // spray paint
     for (const p of allPlayers) {
@@ -133,6 +148,49 @@ export class GameRoom {
       for (const t of tiles) this.map.paint(t.x, t.y, p.colorIndex);
     }
 
+    // Update bullets — paint on impact (writes to map.dirty), check player collisions
+    const bulletsToRemove = [];
+    for (const [bid, bullet] of this.bullets) {
+      bullet.update(this.map);
+
+      if (!bullet.alive) {
+        // Paint impact area (writes to dirty, flushed below)
+        const tx = Math.floor(bullet.x / TILE_SIZE);
+        const ty = Math.floor(bullet.y / TILE_SIZE);
+        const r = BULLET_PAINT_RADIUS;
+        for (let dy = -r; dy <= r; dy++) {
+          for (let dx = -r; dx <= r; dx++) {
+            if (dx * dx + dy * dy <= r * r) {
+              this.map.paint(tx + dx, ty + dy, bullet.ownerIndex);
+            }
+          }
+        }
+        bulletsToRemove.push(bid);
+        this.io.emit('bullet_removed', { id: bid });
+        continue;
+      }
+
+      // Check player collision
+      let hit = false;
+      for (const p of allPlayers) {
+        if (!p.alive || p.id === bullet.ownerId) continue;
+        const dist = Math.hypot(p.x - bullet.x, p.y - bullet.y);
+        if (dist < 12) {
+          const died = p.takeDamage(BULLET_DAMAGE);
+          bullet.alive = false;
+          this.io.emit('player_damaged', { playerId: p.id, hp: p.hp });
+          if (died) this._killPlayer(p);
+          bulletsToRemove.push(bid);
+          this.io.emit('bullet_removed', { id: bid });
+          hit = true;
+          break;
+        }
+      }
+      if (hit) continue;
+    }
+    for (const bid of bulletsToRemove) this.bullets.delete(bid);
+
+    // Single flush — collects dirty from both spray and bullet impacts
     changedTiles.push(...this.map.flushDirty());
 
     // update ink + score
@@ -159,10 +217,14 @@ export class GameRoom {
       }
     }
 
-    // check checkpoint destruction
+    // check checkpoint destruction / damage
     for (const [pid, cp] of this.checkpoints) {
       if (!cp.alive) continue;
-      if (cp.checkDestruction(changedTiles, cp.ownerIndex)) {
+      const result = cp.checkDestruction(changedTiles, cp.ownerIndex);
+      if (result.damaged && !result.destroyed) {
+        this.io.emit('checkpoint_damaged', { playerId: pid, hp: cp.hp, maxHp: cp.maxHp });
+      }
+      if (result.destroyed) {
         const owner = this.players.get(pid);
         if (owner) owner.checkpointAlive = false;
         this.io.emit('checkpoint_destroyed', { playerId: pid });
@@ -181,7 +243,8 @@ export class GameRoom {
         players: this._serializePlayers(),
         changedTiles,
         timeLeft: this.timeLeft,
-        countdown: this.countdown > 0 ? Math.ceil(this.countdown / TICK_RATE) : 0
+        countdown: this.countdown > 0 ? Math.ceil(this.countdown / TICK_RATE) : 0,
+        bullets: [...this.bullets.values()].map(b => b.serialize())
       });
     }
   }
@@ -197,6 +260,7 @@ export class GameRoom {
           player.x = player.spawnX;
           player.y = player.spawnY;
           player.ink = 100;
+          player.hp = PLAYER_MAX_HP;
           player.alive = true;
           this.io.emit('player_respawn', { playerId: player.id });
         } else {

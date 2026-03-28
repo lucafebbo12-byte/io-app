@@ -29,31 +29,39 @@ export class HUDScene extends Phaser.Scene {
       .setScrollFactor(0)
       .setDepth(50);
 
-    // --- Scoreboard (top-right)
+    // --- Scoreboard (top-right) — semi-transparent panel (Paper.io style)
     this.scoreRows = [];
     const scoreX = W - 12;
-    const scoreY = 70;
+    const scoreY = 60;
+    const panelW = 160;
+    const panelH = 5 * 22 + 10;
+    const panelX = W - panelW - 8;
+    const panelGfx = this.add.graphics().setScrollFactor(0).setDepth(49);
+    panelGfx.fillStyle(0x000000, 0.5);
+    panelGfx.fillRoundedRect(panelX, scoreY - 6, panelW, panelH, 6);
+
     for (let i = 0; i < 5; i++) {
-      const rowY = scoreY + i * 20;
-      const dot = this.add
-        .circle(scoreX - 130, rowY + 8, 5, 0xffffff)
-        .setOrigin(0.5)
+      const rowY = scoreY + i * 22;
+      // Colored square instead of dot
+      const square = this.add.graphics()
         .setScrollFactor(0)
         .setDepth(50);
+      square.fillStyle(0xffffff, 1);
+      square.fillRect(panelX + 8, rowY + 3, 10, 10);
 
       const text = this.add
-        .text(scoreX, rowY, '', {
-          fontSize: '14px',
+        .text(scoreX - 6, rowY, '', {
+          fontSize: '13px',
           color: '#ffffff',
           stroke: '#000',
-          strokeThickness: 4,
+          strokeThickness: 3,
           align: 'right'
         })
         .setOrigin(1, 0)
         .setScrollFactor(0)
         .setDepth(50);
 
-      this.scoreRows.push({ dot, text });
+      this.scoreRows.push({ dot: square, text, _squareColorInt: 0xffffff });
     }
 
     // --- Ink "spray can" bar (bottom-center)
@@ -166,7 +174,11 @@ export class HUDScene extends Phaser.Scene {
   }
 
   _renderScores(scores) {
+    const W = this.scale.width;
     const top = scores.slice(0, 5);
+    const panelW = 160;
+    const panelX = W - panelW - 8;
+    const scoreY = 60;
     for (let i = 0; i < 5; i++) {
       const row = this.scoreRows[i];
       const s = top[i];
@@ -177,7 +189,13 @@ export class HUDScene extends Phaser.Scene {
       }
       row.dot.setVisible(true);
       const c = parseInt(String(s.color || '#ffffff').replace('#', ''), 16);
-      row.dot.setFillStyle(c, 1);
+      // Redraw colored square only if color changed
+      if (c !== row._squareColorInt) {
+        row._squareColorInt = c;
+        row.dot.clear();
+        row.dot.fillStyle(c, 1);
+        row.dot.fillRect(panelX + 8, scoreY + i * 22 + 3, 10, 10);
+      }
       row.text.setText(`${i + 1}. ${this._formatName(s.id)}  ${Math.floor(s.score || 0)}`);
     }
   }

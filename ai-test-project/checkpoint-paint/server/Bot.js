@@ -1,6 +1,7 @@
 import { MAP_W, MAP_H, TILE_SIZE, SPRAY_RANGE } from '../shared/constants.js';
 import { Player } from './Player.js';
 
+
 const BOT_NAMES = ['InkBot', 'SplatBot', 'PaintBot', 'DripBot', 'SprayBot', 'BlastBot', 'GushBot', 'FloodBot'];
 
 export class Bot extends Player {
@@ -12,9 +13,10 @@ export class Bot extends Player {
 
     this._changeDirIn = 0;
     this._roamAngle = Math.random() * Math.PI * 2;
-    this._orbitDir = Math.random() < 0.5 ? -1 : 1; // clockwise vs counter-clockwise
+    this._orbitDir = Math.random() < 0.5 ? -1 : 1;
     this._retargetIn = 0;
     this._targetId = null;
+    this._targetCheckpoint = null; // { x, y } world coords of enemy checkpoint to rush
 
     this._dx = Math.cos(this._roamAngle);
     this._dy = Math.sin(this._roamAngle);
@@ -23,20 +25,37 @@ export class Bot extends Player {
     this.ink = 100;
   }
 
-  think(players) {
-    // Pick / refresh target periodically (nearest alive human).
+  /** Call with players array and optional checkpoints Map<playerId, Checkpoint> */
+  think(players, checkpoints) {
     this._retargetIn--;
     if (this._retargetIn <= 0) {
       this._retargetIn = 20 + Math.floor(Math.random() * 20);
-      let best = null;
-      let bestDist = Infinity;
-      for (const p of players) {
-        if (p.id === this.id || p.isBot || !p.alive) continue;
-        const d = Math.hypot(p.x - this.x, p.y - this.y);
-        if (d < bestDist) { bestDist = d; best = p; }
+      if (Math.random() < 0.15) this._orbitDir *= -1;
+
+      // 25% chance: target nearest alive enemy checkpoint instead of a player
+      if (checkpoints && Math.random() < 0.25) {
+        let bestCp = null;
+        let bestDist = Infinity;
+        for (const [ownerId, cp] of checkpoints) {
+          if (!cp.alive || ownerId === this.id) continue;
+          const wx = cp.tileX * TILE_SIZE;
+          const wy = cp.tileY * TILE_SIZE;
+          const d = Math.hypot(wx - this.x, wy - this.y);
+          if (d < bestDist) { bestDist = d; bestCp = cp; }
+        }
+        this._targetCheckpoint = bestCp ? { x: bestCp.tileX * TILE_SIZE, y: bestCp.tileY * TILE_SIZE } : null;
+        this._targetId = null;
+      } else {
+        this._targetCheckpoint = null;
+        let best = null;
+        let bestDist = Infinity;
+        for (const p of players) {
+          if (p.id === this.id || p.isBot || !p.alive) continue;
+          const d = Math.hypot(p.x - this.x, p.y - this.y);
+          if (d < bestDist) { bestDist = d; best = p; }
+        }
+        this._targetId = best?.id ?? null;
       }
-      this._targetId = best?.id ?? null;
-      if (Math.random() < 0.15) this._orbitDir *= -1; // occasional direction swap
     }
 
     const worldW = MAP_W * TILE_SIZE;
@@ -58,13 +77,24 @@ export class Bot extends Player {
     const edgeX = (edgeFactor(left) - edgeFactor(right)) * edgeStrength;
     const edgeY = (edgeFactor(top) - edgeFactor(bottom)) * edgeStrength;
 
-    // Find current target object (if any).
-    const target = this._targetId ? players.find(p => p.id === this._targetId && p.alive && !p.isBot) : null;
+    // Resolve target: either a specific checkpoint position or a player
+    const cpTarget = this._targetCheckpoint;
+    const target = cpTarget
+      ? null
+      : (this._targetId ? players.find(p => p.id === this._targetId && p.alive && !p.isBot) : null);
 
     let moveX = 0;
     let moveY = 0;
 
-    if (target) {
+    // Rush directly toward a checkpoint target (no orbit, just advance and spray)
+    if (cpTarget && !target) {
+      const vx = cpTarget.x - this.x;
+      const vy = cpTarget.y - this.y;
+      const dist = Math.max(1, Math.hypot(vx, vy));
+      this.aimAngle = Math.atan2(vy, vx);
+      moveX = vx / dist;
+      moveY = vy / dist;
+    } else if (target) {
       const vx = target.x - this.x;
       const vy = target.y - this.y;
       const dist = Math.max(1, Math.hypot(vx, vy));

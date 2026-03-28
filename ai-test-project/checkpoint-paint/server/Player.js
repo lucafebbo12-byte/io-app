@@ -2,7 +2,7 @@ import {
   MAP_W, MAP_H, TILE_SIZE, PLAYER_SPEED,
   INK_DRAIN, INK_REFILL, INK_MAX, SPAWN_POINTS, PLAYER_COLORS,
   ZONE_SPEED_OWN, ZONE_SPEED_ENEMY, ZONE_DRAIN_OWN, ZONE_DRAIN_ENEMY, ZONE_REFILL_ENEMY,
-  WALL_THICKNESS_TILES
+  WALL_OWNER_INDEX, PLAYER_MAX_HP
 } from '../shared/constants.js';
 
 export class Player {
@@ -23,6 +23,7 @@ export class Player {
     this.spraying = false;
     this.ink = INK_MAX;
     this.alive = true;
+    this.hp = PLAYER_MAX_HP;
     this.checkpointAlive = true;
     this.score = 0;         // tile count
     this.isBot = false;
@@ -41,22 +42,52 @@ export class Player {
     this.spraying = !!spraying;
   }
 
-  move() {
+  /**
+   * Move with blob-boundary wall collision + sliding.
+   * @param {GameMap|null} map
+   */
+  move(map) {
     if (!this.alive) return;
     const len = Math.hypot(this._dx, this._dy);
     if (len === 0) return;
     const nx = this._dx / len;
     const ny = this._dy / len;
     const speed = PLAYER_SPEED * this.zoneMultiplier.speed;
-    const min = WALL_THICKNESS_TILES * TILE_SIZE;
-    const maxX = (MAP_W - WALL_THICKNESS_TILES) * TILE_SIZE - 1;
-    const maxY = (MAP_H - WALL_THICKNESS_TILES) * TILE_SIZE - 1;
-    this.x = Math.max(min, Math.min(maxX, this.x + nx * speed));
-    this.y = Math.max(min, Math.min(maxY, this.y + ny * speed));
+
+    const newX = this.x + nx * speed;
+    const newY = this.y + ny * speed;
+
+    if (!map) {
+      // Fallback: simple rectangular clamp
+      this.x = Math.max(4, Math.min((MAP_W - 1) * TILE_SIZE - 1, newX));
+      this.y = Math.max(4, Math.min((MAP_H - 1) * TILE_SIZE - 1, newY));
+      return;
+    }
+
+    const tX = (v) => Math.floor(v / TILE_SIZE);
+    const tY = (v) => Math.floor(v / TILE_SIZE);
+    const blocked = (wx, wy) => map.getOwner(tX(wx), tY(wy)) === WALL_OWNER_INDEX;
+
+    if (!blocked(newX, newY)) {
+      this.x = newX;
+      this.y = newY;
+    } else if (!blocked(newX, this.y)) {
+      // Slide along X
+      this.x = newX;
+    } else if (!blocked(this.x, newY)) {
+      // Slide along Y
+      this.y = newY;
+    }
+    // else: fully blocked — don't move
   }
 
   tileX() { return Math.floor(this.x / TILE_SIZE); }
   tileY() { return Math.floor(this.y / TILE_SIZE); }
+
+  takeDamage(amount) {
+    this.hp = Math.max(0, this.hp - amount);
+    return this.hp <= 0; // returns true if died
+  }
 
   updateZone(map) {
     if (!map) {
@@ -104,6 +135,7 @@ export class Player {
       color: this.color,
       ink: this.ink,
       alive: this.alive,
+      hp: this.hp,
       checkpointAlive: this.checkpointAlive,
       score: this.score,
       isBot: this.isBot,
