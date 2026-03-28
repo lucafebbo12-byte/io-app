@@ -14,17 +14,25 @@ export class TerritoryMap {
     this.showTileFallback = false;
     this.maxStampsPerFrame = 500;
     this._stampQueue = [];
+    this.worldW = mapW * TILE_SIZE;
+    this.worldH = mapH * TILE_SIZE;
+
+    this._ensureFloorTexture();
+    this.floor = scene.add
+      .image(0, 0, `floor_bg_${mapW}x${mapH}`)
+      .setOrigin(0, 0)
+      .setDepth(-0.5);
 
     // Off-screen render texture for the full territory grid
     this.rt = scene.add
-      .renderTexture(0, 0, mapW * TILE_SIZE, mapH * TILE_SIZE)
+      .renderTexture(0, 0, this.worldW, this.worldH)
       .setOrigin(0, 0)
       .setDepth(0);
     this.rt.setVisible(this.showTileFallback);
 
     // Smooth visual paint layer (separate from logical tile ownership renderer)
     this.smoothPaintRT = scene.add
-      .renderTexture(0, 0, mapW * TILE_SIZE, mapH * TILE_SIZE)
+      .renderTexture(0, 0, this.worldW, this.worldH)
       .setOrigin(0, 0)
       .setDepth(0.5);
 
@@ -70,16 +78,11 @@ export class TerritoryMap {
         g.fillRect(0, 0, TILE_SIZE, TILE_SIZE);
 
       } else if (idx === 0) {
-        // Neutral arena floor: dark blue-grey with 1-px grid lines
-        g.fillStyle(0x23233a, 1);
+        // Neutral tile fallback (main floor is now a large premium background texture)
+        g.fillStyle(0x1e2035, 1);
         g.fillRect(0, 0, TILE_SIZE, TILE_SIZE);
-        g.lineStyle(1, 0x2e2e4a, 0.8);
-        g.beginPath();
-        g.moveTo(TILE_SIZE - 1, 0);
-        g.lineTo(TILE_SIZE - 1, TILE_SIZE);
-        g.moveTo(0, TILE_SIZE - 1);
-        g.lineTo(TILE_SIZE, TILE_SIZE - 1);
-        g.strokePath();
+        g.fillStyle(0x2a2b48, 0.55);
+        g.fillRect(Math.floor(TILE_SIZE / 2), Math.floor(TILE_SIZE / 2), 1, 1);
 
       } else {
         // ── Dye Hard–style glossy paint tile ──────────────────────────
@@ -103,6 +106,34 @@ export class TerritoryMap {
       g.generateTexture(key, TILE_SIZE, TILE_SIZE);
       g.destroy();
     }
+  }
+
+  _ensureFloorTexture() {
+    const key = `floor_bg_${this.mapW}x${this.mapH}`;
+    if (this.scene.textures.exists(key)) return;
+
+    const tex = this.scene.textures.createCanvas(key, this.worldW, this.worldH);
+    const ctx = tex.getContext();
+
+    const cx = this.worldW * 0.5;
+    const cy = this.worldH * 0.5;
+    const maxR = Math.hypot(cx, cy);
+    const grad = ctx.createRadialGradient(cx, cy, maxR * 0.1, cx, cy, maxR);
+    grad.addColorStop(0, '#262944');
+    grad.addColorStop(1, '#171a2d');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, this.worldW, this.worldH);
+
+    ctx.fillStyle = 'rgba(58, 61, 92, 0.25)';
+    const spacing = 24;
+    for (let y = 12; y < this.worldH; y += spacing) {
+      for (let x = 12; x < this.worldW; x += spacing) {
+        const jitterX = ((x + y) % 3) - 1;
+        const jitterY = ((x * y) % 3) - 1;
+        ctx.fillRect(x + jitterX, y + jitterY, 2, 2);
+      }
+    }
+    tex.refresh();
   }
 
   _ensureBrushTexture() {
