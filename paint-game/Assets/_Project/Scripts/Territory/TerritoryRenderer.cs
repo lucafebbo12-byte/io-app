@@ -21,17 +21,25 @@ namespace PaintGame
 
         private CommandBuffer    _cmd;
         private Mesh             _stampMesh;
+        private Mesh             _paintBlobMesh;
         private MaterialPropertyBlock _mpb;
         private Camera           _rtCamera;     // orthographic camera pointed at RT
+
+        // Arena palette — bright neutral floor, dark charcoal walls
+        private static readonly Color NeutralColor = new Color(0.97f, 0.97f, 0.97f, 1f);
+        private static readonly Color WallColor    = new Color(0.15f, 0.15f, 0.18f, 1f);
 
         // ── Per-tile world size (quad scale) ──────────────────────────────────
         private static readonly Vector3 _tileScale = new Vector3(
             GameConstants.TILE_SIZE, GameConstants.TILE_SIZE, 1f);
+        private static readonly Vector3 _blobScale = new Vector3(
+            GameConstants.TILE_SIZE * 2.2f, GameConstants.TILE_SIZE * 2.2f, 1f);
 
         void Awake()
         {
             _cmd       = new CommandBuffer { name = "TerritoryPaint" };
             _stampMesh = BuildQuadMesh();
+            _paintBlobMesh = BuildCircleMesh(24);
             _mpb       = new MaterialPropertyBlock();
 
             // Set the RT on the floor quad's material
@@ -56,8 +64,9 @@ namespace PaintGame
             _rtCamera.targetTexture   = _paintRT;
             _rtCamera.enabled         = false;  // we call Render() manually
 
-            // Clear RT to transparent (white floor shows through where alpha=0)
+            // Clear RT to neutral color, then immediately stamp wall tiles
             ClearRT();
+            SeedWalls();
         }
 
         void OnDestroy()
@@ -98,20 +107,24 @@ namespace PaintGame
             {
                 Color col;
                 if (tile.ownerIndex == GameConstants.OWNER_NEUTRAL)
-                    col = new Color(1f, 1f, 1f, 0f);   // transparent = white floor shows
+                    col = NeutralColor;
                 else if (tile.ownerIndex == GameConstants.OWNER_WALL)
-                    col = new Color(0.15f, 0.15f, 0.15f, 1f);
+                    col = WallColor;
                 else
                     col = GameConstants.PLAYER_COLORS[tile.ownerIndex];
 
                 _mpb.SetColor("_Color", col);
 
+                bool isPaintOwner = tile.ownerIndex != GameConstants.OWNER_NEUTRAL &&
+                                    tile.ownerIndex != GameConstants.OWNER_WALL;
+                var mesh = isPaintOwner ? _paintBlobMesh : _stampMesh;
+                var scale = isPaintOwner ? _blobScale : _tileScale;
                 var matrix = Matrix4x4.TRS(
                     GameConstants.TileToWorld(tile.tx, tile.ty),
                     Quaternion.identity,
-                    _tileScale
+                    scale
                 );
-                _cmd.DrawMesh(_stampMesh, matrix, _stampMaterial, 0, 0, _mpb);
+                _cmd.DrawMesh(mesh, matrix, _stampMaterial, 0, 0, _mpb);
             }
 
             Graphics.ExecuteCommandBuffer(_cmd);
@@ -120,12 +133,26 @@ namespace PaintGame
             _hasPending = false;
         }
 
+        // ── Wall seeding ──────────────────────────────────────────────────────
+        /// <summary>Stamps all out-of-blob tiles as walls on startup.</summary>
+        private void SeedWalls()
+        {
+            var wallTiles = new System.Collections.Generic.List<PaintedTile>(4096);
+            for (int ty = 0; ty < GameConstants.MAP_H; ty++)
+            for (int tx = 0; tx < GameConstants.MAP_W; tx++)
+            {
+                if (GameConstants.IsWall(tx, ty))
+                    wallTiles.Add(new PaintedTile(tx, ty, GameConstants.OWNER_WALL));
+            }
+            SeedTilesImmediate(wallTiles);
+        }
+
         // ── Helpers ───────────────────────────────────────────────────────────
         private void ClearRT()
         {
             var prev = RenderTexture.active;
             RenderTexture.active = _paintRT;
-            GL.Clear(true, true, new Color(1f, 1f, 1f, 0f));
+            GL.Clear(true, true, NeutralColor);
             RenderTexture.active = prev;
         }
 
@@ -140,6 +167,37 @@ namespace PaintGame
             };
             mesh.uv        = new[] { Vector2.zero, Vector2.right, Vector2.one, Vector2.up };
             mesh.triangles = new[] { 0, 2, 1, 0, 3, 2 };
+            mesh.RecalculateBounds();
+            return mesh;
+        }
+
+        private static Mesh BuildCircleMesh(int segments)
+        {
+            var mesh = new Mesh { name = "PaintBlobCircle" };
+            var vertices = new Vector3[segments + 1];
+            var uv = new Vector2[segments + 1];
+            var triangles = new int[segments * 3];
+
+            vertices[0] = Vector3.zero;
+            uv[0] = new Vector2(0.5f, 0.5f);
+
+            for (int i = 0; i < segments; i++)
+            {
+                float a = i * Mathf.PI * 2f / segments;
+                float x = Mathf.Cos(a) * 0.5f;
+                float y = Mathf.Sin(a) * 0.5f;
+                vertices[i + 1] = new Vector3(x, y, 0f);
+                uv[i + 1] = new Vector2(x + 0.5f, y + 0.5f);
+
+                int tri = i * 3;
+                triangles[tri] = 0;
+                triangles[tri + 1] = i + 1;
+                triangles[tri + 2] = (i == segments - 1) ? 1 : i + 2;
+            }
+
+            mesh.vertices = vertices;
+            mesh.uv = uv;
+            mesh.triangles = triangles;
             mesh.RecalculateBounds();
             return mesh;
         }

@@ -54,6 +54,12 @@ namespace PaintGame
 
         protected abstract void FireBurst(Vector2 origin, float aimAngle, byte ownerIndex, Color color);
 
+        protected void RegisterSpawnedBullet(BulletProjectile bullet)
+        {
+            if (bullet == null) return;
+            GameManager.Instance?.MatchManager?.RegisterBullet(bullet);
+        }
+
         // ── Ink refill ────────────────────────────────────────────────────────
         public void RefillTick(float dt)
         {

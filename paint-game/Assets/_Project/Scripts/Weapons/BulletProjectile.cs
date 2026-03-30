@@ -7,6 +7,7 @@ namespace PaintGame
     [RequireComponent(typeof(SpriteRenderer))]
     public class BulletProjectile : MonoBehaviour
     {
+        private static Sprite _runtimeBulletSprite;
         // ── State ──────────────────────────────────────────────────────────────
         public  byte    OwnerIndex  { get; private set; }
         private Color   _color;
@@ -29,6 +30,7 @@ namespace PaintGame
             _map  = map;
             _pool = pool;
             _sr   = GetComponent<SpriteRenderer>();
+            EnsureVisualSetup();
         }
 
         public void Init(Vector2 origin, float aimAngle, byte ownerIndex, Color color,
@@ -52,6 +54,7 @@ namespace PaintGame
                 _sr.color   = color;
                 _sr.enabled = true;
             }
+            transform.localScale = new Vector3(4.5f, 1.8f, 1f);
             gameObject.SetActive(true);
         }
 
@@ -127,6 +130,49 @@ namespace PaintGame
             _active = false;
             if (_sr != null) _sr.enabled = false;
             _pool.ReturnBullet(this);
+        }
+
+        private void EnsureVisualSetup()
+        {
+            if (_sr == null) return;
+            _sr.sortingOrder = 12;
+            if (_sr.sprite == null)
+                _sr.sprite = GetRuntimeBulletSprite();
+        }
+
+        private static Sprite GetRuntimeBulletSprite()
+        {
+            if (_runtimeBulletSprite != null) return _runtimeBulletSprite;
+
+            const int size = 24;
+            var tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
+            var center = (size - 1) * 0.5f;
+            var rx = size * 0.42f;
+            var ry = size * 0.24f;
+
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    float nx = (x - center) / rx;
+                    float ny = (y - center) / ry;
+                    float d = nx * nx + ny * ny;
+                    if (d <= 1f)
+                    {
+                        float a = Mathf.Clamp01(1f - d);
+                        tex.SetPixel(x, y, new Color(1f, 1f, 1f, a));
+                    }
+                    else
+                    {
+                        tex.SetPixel(x, y, Color.clear);
+                    }
+                }
+            }
+
+            tex.filterMode = FilterMode.Bilinear;
+            tex.Apply();
+            _runtimeBulletSprite = Sprite.Create(tex, new Rect(0, 0, size, size), new Vector2(0.5f, 0.5f), 8f);
+            return _runtimeBulletSprite;
         }
     }
 }

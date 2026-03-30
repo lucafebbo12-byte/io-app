@@ -44,8 +44,8 @@ namespace PaintGame
                 // Assign weapon component
                 WeaponConfigSO cfg = (isHuman && SelectedWeaponIndex == 1) ? _akConfig : _shotgunConfig;
                 WeaponBase weapon  = cfg.weaponName == "AK"
-                    ? (WeaponBase)go.GetComponent<AKWeapon>() ?? go.AddComponent<AKWeapon>()
-                    : (WeaponBase)go.GetComponent<ShotgunWeapon>() ?? go.AddComponent<ShotgunWeapon>();
+                    ? (WeaponBase)go.GetComponent<AKWeapon>() ?? go.gameObject.AddComponent<AKWeapon>()
+                    : (WeaponBase)go.GetComponent<ShotgunWeapon>() ?? go.gameObject.AddComponent<ShotgunWeapon>();
 
                 // Reflect the config onto the weapon
                 var wField = typeof(WeaponBase).GetField("_config",
@@ -53,7 +53,7 @@ namespace PaintGame
                 wField?.SetValue(weapon, cfg);
 
                 // Find this player's checkpoint
-                var checkpoints = FindObjectsOfType<CheckpointController>();
+                var checkpoints = Object.FindObjectsByType<CheckpointController>(FindObjectsSortMode.None);
                 CheckpointController cp = null;
                 foreach (var c in checkpoints)
                     if (c.OwnerIndex == ownerIndex) { cp = c; break; }
@@ -67,6 +67,34 @@ namespace PaintGame
                     go.GetComponent<BotController>()?.Init(go.GetComponent<PlayerController>());
 
                 Players[i] = go.GetComponent<PlayerController>();
+            }
+
+            // Initialize checkpoint HP/visual state and link each one to its owner player.
+            var allCheckpoints = Object.FindObjectsByType<CheckpointController>(FindObjectsSortMode.None);
+            var usedOwners = new bool[GameConstants.TOTAL_PLAYERS + 1];
+            for (int i = 0; i < allCheckpoints.Length; i++)
+            {
+                var cp = allCheckpoints[i];
+                byte owner = cp.OwnerIndex;
+                bool invalidOwner = owner < 1 || owner > GameConstants.TOTAL_PLAYERS || usedOwners[owner];
+                if (invalidOwner)
+                {
+                    for (byte candidate = 1; candidate <= GameConstants.TOTAL_PLAYERS; candidate++)
+                    {
+                        if (!usedOwners[candidate])
+                        {
+                            owner = candidate;
+                            cp.OwnerIndex = owner;
+                            break;
+                        }
+                    }
+                }
+
+                usedOwners[owner] = true;
+
+                int idx = owner - 1;
+                if (idx >= 0 && idx < Players.Length)
+                    cp.Init(owner, Players[idx]);
             }
         }
     }

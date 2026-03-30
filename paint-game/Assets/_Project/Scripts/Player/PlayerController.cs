@@ -14,9 +14,11 @@ namespace PaintGame
         public  PlayerStats  Stats   { get; private set; }
         private PlayerInput  _input;
         private PlayerVisuals _visuals;
+        private AimConeRenderer _aimCone;
         private WeaponBase   _weapon;
         private TerritoryMap _map;
         private CheckpointController _checkpoint;
+        private SpriteRenderer _cachedSpriteRenderer;
 
         // ── Respawn ───────────────────────────────────────────────────────────
         private Vector2 _spawnPos;
@@ -30,10 +32,12 @@ namespace PaintGame
             Stats         = GetComponent<PlayerStats>();
             _input        = GetComponent<PlayerInput>();
             _visuals      = GetComponent<PlayerVisuals>();
+            _aimCone      = GetComponent<AimConeRenderer>();
             _weapon       = weapon;
             _map          = map;
             _checkpoint   = checkpoint;
             _spawnPos     = spawnWorldPos;
+            _cachedSpriteRenderer = GetComponentInChildren<SpriteRenderer>();
 
             Stats.OwnerIndex  = ownerIndex;
             Stats.PlayerColor = color;
@@ -48,6 +52,8 @@ namespace PaintGame
                 _input.Init(Stats);
 
             _visuals?.Init(Stats);
+            _aimCone?.Init(Stats, _weapon);
+            EnsureReadableVisualScale();
         }
 
         // ── Logic tick (20 Hz, called by MatchManager) ────────────────────────
@@ -117,10 +123,14 @@ namespace PaintGame
         {
             // Check the four corners of a small player bounding box (8×8 units)
             float half = 3.5f;
-            return _map.IsWall(GameConstants.WorldToTile(pos.x - half, pos.y - half))
-                || _map.IsWall(GameConstants.WorldToTile(pos.x + half, pos.y - half))
-                || _map.IsWall(GameConstants.WorldToTile(pos.x - half, pos.y + half))
-                || _map.IsWall(GameConstants.WorldToTile(pos.x + half, pos.y + half));
+            var t0 = GameConstants.WorldToTile(pos.x - half, pos.y - half);
+            var t1 = GameConstants.WorldToTile(pos.x + half, pos.y - half);
+            var t2 = GameConstants.WorldToTile(pos.x - half, pos.y + half);
+            var t3 = GameConstants.WorldToTile(pos.x + half, pos.y + half);
+            return _map.IsWall(t0.x, t0.y)
+                || _map.IsWall(t1.x, t1.y)
+                || _map.IsWall(t2.x, t2.y)
+                || _map.IsWall(t3.x, t3.y);
         }
 
         // ── Zone detection ─────────────────────────────────────────────────────
@@ -164,13 +174,13 @@ namespace PaintGame
         private IEnumerator RespawnCoroutine()
         {
             _respawning = true;
-            gameObject.GetComponent<SpriteRenderer>().enabled = false;
+            if (_cachedSpriteRenderer != null) _cachedSpriteRenderer.enabled = false;
             yield return new WaitForSeconds(GameConstants.RESPAWN_DELAY);
 
             Stats.WorldPos = _spawnPos;
             transform.position = new Vector3(_spawnPos.x, _spawnPos.y, 0f);
             Stats.ResetForRespawn();
-            gameObject.GetComponent<SpriteRenderer>().enabled = true;
+            if (_cachedSpriteRenderer != null) _cachedSpriteRenderer.enabled = true;
             _respawning = false;
 
             GameEvents.RaisePlayerRespawned(this);
@@ -196,5 +206,21 @@ namespace PaintGame
         }
 
         public CheckpointController GetCheckpoint() => _checkpoint;
+
+        private void EnsureReadableVisualScale()
+        {
+            var body = transform.Find("Body");
+            if (body != null && body.localScale.sqrMagnitude < 80f)
+                body.localScale = new Vector3(12f, 12f, 1f);
+
+            var gun = transform.Find("GunPivot/GunSprite");
+            if (gun != null)
+            {
+                if (gun.localPosition.sqrMagnitude < 50f)
+                    gun.localPosition = new Vector3(11f, 0f, 0f);
+                if (gun.localScale.sqrMagnitude < 20f)
+                    gun.localScale = new Vector3(6f, 2.2f, 1f);
+            }
+        }
     }
 }

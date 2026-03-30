@@ -104,8 +104,10 @@ namespace PaintGame
 
             // Shoot / Spray
             bool lmb = Mouse.current != null && Mouse.current.leftButton.isPressed;
-            _stats.IsShooting    = lmb;
-            _stats.WantsToShoot  = lmb;
+            bool space = Keyboard.current != null && Keyboard.current.spaceKey.isPressed;
+            bool shooting = lmb || space;
+            _stats.IsShooting    = shooting;
+            _stats.WantsToShoot  = shooting;
         }
 
         private void ReadMobile()

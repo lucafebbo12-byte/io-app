@@ -1,0 +1,25 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 36d1eb209abdb9a40828cff2cdd32fbc, type: 3}
+  m_Name: AK
+  m_EditorClassIdentifier: 
+  weaponName: AK
+  weaponSprite: {fileID: 0}
+  moveSpeedMultiplier: 0.9
+  sprayHalfAngle: 0.2617994
+  sprayRange: 280
+  bulletsPerShot: 1
+  bulletSpreadDeg: 3
+  fireRate: 6
+  inkDrainPerSec: 40
+  bulletDamage: 1
+  bulletSpeed: 280

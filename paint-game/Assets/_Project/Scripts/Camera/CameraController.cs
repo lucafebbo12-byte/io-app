@@ -40,6 +40,15 @@ namespace PaintGame
         void Update()
         {
             if (_vcam == null) return;
+
+            if (_vcam.Follow == null &&
+                PlayerSpawnManager.Players != null &&
+                PlayerSpawnManager.Players.Length > 0 &&
+                PlayerSpawnManager.Players[0] != null)
+            {
+                _vcam.Follow = PlayerSpawnManager.Players[0].transform;
+            }
+
             var lens = _vcam.Lens;
             lens.OrthographicSize = Mathf.Lerp(
                 lens.OrthographicSize, _targetOrthoSize, Time.deltaTime * _zoomSpeed);

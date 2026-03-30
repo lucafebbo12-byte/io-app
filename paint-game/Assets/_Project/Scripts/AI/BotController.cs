@@ -99,8 +99,8 @@ namespace PaintGame
         }
 
         private void Retarget() => ChooseState(
-            new List<PlayerController>(FindObjectsOfType<PlayerController>()),
-            new List<CheckpointController>(FindObjectsOfType<CheckpointController>()));
+            new List<PlayerController>(Object.FindObjectsByType<PlayerController>(FindObjectsSortMode.None)),
+            new List<CheckpointController>(Object.FindObjectsByType<CheckpointController>(FindObjectsSortMode.None)));
 
         // ── Movement computation ───────────────────────────────────────────────
         private Vector2 ComputeMove(float dt)
@@ -133,7 +133,20 @@ namespace PaintGame
                 _changeDirTimer = 0f;
                 _roamAngle += Random.Range(-0.8f, 0.8f);
             }
-            return new Vector2(Mathf.Cos(_roamAngle), Mathf.Sin(_roamAngle));
+
+            var dir = new Vector2(Mathf.Cos(_roamAngle), Mathf.Sin(_roamAngle));
+
+            // Wall probe — if heading toward a wall, deflect early
+            Vector2 probe = _self.Stats.WorldPos + dir * GameConstants.TILE_SIZE * 3f;
+            var pt = GameConstants.WorldToTile(probe.x, probe.y);
+            if (GameConstants.IsWall(pt.x, pt.y))
+            {
+                _roamAngle += Mathf.PI * 0.5f + Random.Range(-0.3f, 0.3f);
+                _changeDirTimer = 0f;
+                dir = new Vector2(Mathf.Cos(_roamAngle), Mathf.Sin(_roamAngle));
+            }
+
+            return dir;
         }
 
         private Vector2 ComputeOrbit(Vector2 myPos, Vector2 targetPos)

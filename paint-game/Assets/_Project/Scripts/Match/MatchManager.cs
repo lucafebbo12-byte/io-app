@@ -156,9 +156,9 @@ namespace PaintGame
         private void CollectPlayers()
         {
             _players     = new List<PlayerController>(
-                FindObjectsOfType<PlayerController>());
+                Object.FindObjectsByType<PlayerController>(FindObjectsSortMode.None));
             _checkpoints = new List<CheckpointController>(
-                FindObjectsOfType<CheckpointController>());
+                Object.FindObjectsByType<CheckpointController>(FindObjectsSortMode.None));
         }
     }
 }

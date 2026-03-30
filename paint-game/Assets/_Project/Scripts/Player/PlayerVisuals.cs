@@ -5,6 +5,8 @@ namespace PaintGame
 {
     public class PlayerVisuals : MonoBehaviour
     {
+        private static readonly Sprite[] _shapeSprites = new Sprite[7]; // indices 1-6
+
         [SerializeField] private SpriteRenderer _body;
         [SerializeField] private Transform      _gunPivot;
         [SerializeField] private SpriteRenderer _gunRenderer;
@@ -24,9 +26,21 @@ namespace PaintGame
         public void Init(PlayerStats stats)
         {
             _stats = stats;
-            if (_body        != null) _body.color        = stats.PlayerColor;
+            int idx = Mathf.Clamp(stats.OwnerIndex, 1, 6);
+            if (_shapeSprites[idx] == null)
+                _shapeSprites[idx] = BuildShapeSprite(idx);
+            if (_body != null)
+            {
+                _body.sprite = _shapeSprites[idx];
+                _body.color  = stats.PlayerColor;
+            }
             if (_gunRenderer != null) _gunRenderer.color = stats.PlayerColor;
-            if (_glowSprite  != null) { _glowSprite.color = stats.PlayerColor; _glowSprite.enabled = false; }
+            if (_glowSprite  != null)
+            {
+                if (_glowSprite.sprite == null) _glowSprite.sprite = _shapeSprites[idx];
+                _glowSprite.color   = stats.PlayerColor;
+                _glowSprite.enabled = false;
+            }
         }
 
         void Update()
@@ -80,6 +94,70 @@ namespace PaintGame
             _body.color = Color.white;
             yield return new WaitForSeconds(0.08f);
             _body.color = original;
+        }
+
+        private static Sprite BuildShapeSprite(int ownerIndex)
+        {
+            const int size = 64;
+            float center = (size - 1) * 0.5f;
+            float r = size * 0.44f;
+
+            var tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
+            tex.filterMode = FilterMode.Bilinear;
+
+            for (int y = 0; y < size; y++)
+            for (int x = 0; x < size; x++)
+            {
+                float nx = (x - center) / r;
+                float ny = (y - center) / r;
+                bool inside = IsInsideShape(ownerIndex, nx, ny);
+                tex.SetPixel(x, y, new Color(1f, 1f, 1f, inside ? 1f : 0f));
+            }
+            tex.Apply();
+            return Sprite.Create(tex, new Rect(0, 0, size, size), new Vector2(0.5f, 0.5f), 8f);
+        }
+
+        private static bool IsInsideShape(int idx, float nx, float ny)
+        {
+            switch (idx)
+            {
+                case 1: // Circle
+                    return nx * nx + ny * ny <= 1f;
+
+                case 2: // Rounded square (superellipse p=4)
+                {
+                    float ax = Mathf.Abs(nx), ay = Mathf.Abs(ny);
+                    return ax * ax * ax * ax + ay * ay * ay * ay <= 1f;
+                }
+
+                case 3: // Wide oval
+                    return (nx / 1.4f) * (nx / 1.4f) + ny * ny <= 1f;
+
+                case 4: // Triangle pointing right, vertices: (1,0), (-0.8, 0.8), (-0.8, -0.8)
+                {
+                    float ax=1f, ay=0f, bx=-0.8f, by=0.8f, cx=-0.8f, cy=-0.8f;
+                    float d1 = (nx - bx) * (ay - by) - (ax - bx) * (ny - by);
+                    float d2 = (nx - cx) * (by - cy) - (bx - cx) * (ny - cy);
+                    float d3 = (nx - ax) * (cy - ay) - (cx - ax) * (ny - ay);
+                    bool hasNeg = (d1 < 0) || (d2 < 0) || (d3 < 0);
+                    bool hasPos = (d1 > 0) || (d2 > 0) || (d3 > 0);
+                    return !(hasNeg && hasPos);
+                }
+
+                case 5: // 4-lobe star
+                {
+                    float angle = Mathf.Atan2(ny, nx);
+                    float dist  = Mathf.Sqrt(nx * nx + ny * ny);
+                    float wobble = 1f + 0.22f * Mathf.Cos(4f * angle);
+                    return dist <= wobble * 0.9f;
+                }
+
+                case 6: // Tall oval
+                    return nx * nx + (ny / 1.4f) * (ny / 1.4f) <= 1f;
+
+                default:
+                    return nx * nx + ny * ny <= 1f;
+            }
         }
     }
 }

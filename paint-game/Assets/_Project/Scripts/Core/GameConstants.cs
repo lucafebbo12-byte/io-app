@@ -56,48 +56,63 @@ namespace PaintGame
         // Players use indices 1-6
 
         // ── Player colors ─────────────────────────────────────────────────────
-        // Saturated palette matching Paper.io / Dye Hard feel
+        // Bold saturated palette — index 0 = neutral/clear, 1-6 = players
         public static readonly Color[] PLAYER_COLORS = new Color[]
         {
-            Color.clear,                                            // 0 = neutral (unused)
-            new Color(0.96f, 0.26f, 0.21f, 1f),  // 1 Red
-            new Color(0.13f, 0.59f, 0.95f, 1f),  // 2 Blue
-            new Color(0.30f, 0.69f, 0.31f, 1f),  // 3 Green
-            new Color(1.00f, 0.76f, 0.03f, 1f),  // 4 Yellow
-            new Color(0.61f, 0.15f, 0.69f, 1f),  // 5 Purple
-            new Color(1.00f, 0.34f, 0.13f, 1f),  // 6 Orange
+            Color.clear,                                              // 0 = neutral
+            new Color(0.95f, 0.15f, 0.15f, 1f),  // 1 Red
+            new Color(0.10f, 0.55f, 1.00f, 1f),  // 2 Blue
+            new Color(1.00f, 0.65f, 0.00f, 1f),  // 3 Orange
+            new Color(0.10f, 0.90f, 0.20f, 1f),  // 4 Bright Green
+            new Color(0.65f, 0.10f, 0.90f, 1f),  // 5 Purple
+            new Color(0.00f, 0.90f, 0.90f, 1f),  // 6 Cyan
         };
 
-        // ── Spawn / Checkpoint positions (tile coordinates) ───────────────────
-        // 6 positions: 4 corners + 2 mid-sides
+        // ── Blob arena definition ─────────────────────────────────────────────
+        public struct BlobDef
+        {
+            public float CenterX, CenterY, RadiusX, RadiusY;
+        }
+
+        // 7 blobs: 1 central hub + 6 arms (one per player)
+        public static readonly BlobDef[] BLOB_DEFS = new BlobDef[]
+        {
+            new BlobDef { CenterX=120, CenterY=120, RadiusX=42, RadiusY=42 }, // hub
+            new BlobDef { CenterX=188, CenterY=120, RadiusX=28, RadiusY=22 }, // arm 0°
+            new BlobDef { CenterX=154, CenterY=179, RadiusX=22, RadiusY=28 }, // arm 60°
+            new BlobDef { CenterX= 86, CenterY=179, RadiusX=22, RadiusY=28 }, // arm 120°
+            new BlobDef { CenterX= 52, CenterY=120, RadiusX=28, RadiusY=22 }, // arm 180°
+            new BlobDef { CenterX= 86, CenterY= 61, RadiusX=22, RadiusY=28 }, // arm 240°
+            new BlobDef { CenterX=154, CenterY= 61, RadiusX=22, RadiusY=28 }, // arm 300°
+        };
+
+        // ── Spawn positions (tile coordinates) — one per arm blob ─────────────
         public static readonly Vector2Int[] SPAWN_TILES = new Vector2Int[]
         {
-            new Vector2Int(20,  20),   // top-left
-            new Vector2Int(220, 20),   // top-right
-            new Vector2Int(20,  220),  // bottom-left
-            new Vector2Int(220, 220),  // bottom-right
-            new Vector2Int(120, 20),   // top-mid
-            new Vector2Int(120, 220),  // bottom-mid
+            new Vector2Int(188, 120),  // arm 0°
+            new Vector2Int(154, 179),  // arm 60°
+            new Vector2Int( 86, 179),  // arm 120°
+            new Vector2Int( 52, 120),  // arm 180°
+            new Vector2Int( 86,  61),  // arm 240°
+            new Vector2Int(154,  61),  // arm 300°
         };
 
         // ── Wall geometry helpers ──────────────────────────────────────────────
-        // Cross structure matching the JS Map.isWall()
-        public const int BORDER_THICKNESS        = 2;
-        public const int CROSS_GAP_HALF          = 22;   // gap = 44 tiles centred on map
+        public static bool IsInBlob(int tx, int ty)
+        {
+            foreach (var b in BLOB_DEFS)
+            {
+                float nx = (tx - b.CenterX) / b.RadiusX;
+                float ny = (ty - b.CenterY) / b.RadiusY;
+                if (nx * nx + ny * ny <= 1f) return true;
+            }
+            return false;
+        }
 
         public static bool IsWall(int tx, int ty)
         {
-            // Border
-            if (tx < BORDER_THICKNESS || ty < BORDER_THICKNESS ||
-                tx >= MAP_W - BORDER_THICKNESS || ty >= MAP_H - BORDER_THICKNESS)
-                return true;
-
-            // Central cross (horizontal beam)
-            int cx = MAP_W / 2;
-            int cy = MAP_H / 2;
-            bool inHBeam = (ty >= cy - 2 && ty <= cy + 1) && (tx < cx - CROSS_GAP_HALF || tx >= cx + CROSS_GAP_HALF);
-            bool inVBeam = (tx >= cx - 2 && tx <= cx + 1) && (ty < cy - CROSS_GAP_HALF || ty >= cy + CROSS_GAP_HALF);
-            return inHBeam || inVBeam;
+            if (!InBounds(tx, ty)) return true;
+            return !IsInBlob(tx, ty);
         }
 
         // ── Helpers ───────────────────────────────────────────────────────────

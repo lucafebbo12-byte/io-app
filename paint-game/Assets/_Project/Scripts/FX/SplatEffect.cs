@@ -16,7 +16,7 @@ namespace PaintGame
         {
             transform.position = new Vector3(pos.x, pos.y, 0f);
             _sr.color = new Color(color.r, color.g, color.b, 0.7f);
-            float size = GameConstants.TILE_SIZE * Random.Range(1.5f, 3f);
+            float size = GameConstants.TILE_SIZE * UnityEngine.Random.Range(1.5f, 3f);
             transform.localScale = Vector3.one * 0.2f * size;
             StartCoroutine(Animate(size, onComplete));
         }

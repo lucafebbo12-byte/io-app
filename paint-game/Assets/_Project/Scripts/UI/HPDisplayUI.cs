@@ -17,6 +17,7 @@ namespace PaintGame
 
         private void UpdateHP(int hp)
         {
+            if (_hearts == null || _hearts.Length == 0) return;
             for (int i = 0; i < _hearts.Length; i++)
                 if (_hearts[i] != null)
                     _hearts[i].color = i < hp ? Color.white : new Color(1f, 1f, 1f, 0.2f);

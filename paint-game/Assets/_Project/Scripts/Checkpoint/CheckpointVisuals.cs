@@ -7,6 +7,8 @@ namespace PaintGame
 {
     public class CheckpointVisuals : MonoBehaviour
     {
+        private static Sprite _runtimeSprite;
+
         [SerializeField] private LineRenderer _hpRing;
         [SerializeField] private SpriteRenderer _starIcon;
         [SerializeField] private SpriteRenderer _baseIcon;
@@ -17,6 +19,7 @@ namespace PaintGame
 
         public void Init(byte ownerIndex, Color color)
         {
+            EnsureRuntimeVisualChildren();
             _playerColor = color;
 
             if (_baseIcon != null) _baseIcon.color = new Color(color.r, color.g, color.b, 0.4f);
@@ -92,6 +95,71 @@ namespace PaintGame
                 yield return null;
             }
             onComplete?.Invoke();
+        }
+
+        private void EnsureRuntimeVisualChildren()
+        {
+            if (_baseIcon == null)
+            {
+                var baseGo = new GameObject("BaseIcon");
+                baseGo.transform.SetParent(transform, false);
+                _baseIcon = baseGo.AddComponent<SpriteRenderer>();
+                _baseIcon.sprite = GetRuntimeSprite();
+                _baseIcon.sortingOrder = 2;
+                baseGo.transform.localScale = new Vector3(14f, 14f, 1f);
+            }
+
+            if (_starIcon == null)
+            {
+                var starGo = new GameObject("StarIcon");
+                starGo.transform.SetParent(transform, false);
+                _starIcon = starGo.AddComponent<SpriteRenderer>();
+                _starIcon.sprite = GetRuntimeSprite();
+                _starIcon.sortingOrder = 4;
+                starGo.transform.localScale = new Vector3(4f, 4f, 1f);
+            }
+
+            if (_hpRing == null)
+            {
+                var ringGo = new GameObject("HPRing");
+                ringGo.transform.SetParent(transform, false);
+                _hpRing = ringGo.AddComponent<LineRenderer>();
+                _hpRing.material = new Material(Shader.Find("Sprites/Default"));
+                _hpRing.textureMode = LineTextureMode.Stretch;
+                _hpRing.sortingOrder = 3;
+            }
+        }
+
+        private static Sprite GetRuntimeSprite()
+        {
+            if (_runtimeSprite != null) return _runtimeSprite;
+
+            const int size = 48;
+            var tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
+            var c = (size - 1) * 0.5f;
+            var r = size * 0.45f;
+
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    float d = Vector2.Distance(new Vector2(x, y), new Vector2(c, c));
+                    if (d <= r)
+                    {
+                        float alpha = Mathf.Clamp01(1f - (d / r) * 0.8f);
+                        tex.SetPixel(x, y, new Color(1f, 1f, 1f, alpha));
+                    }
+                    else
+                    {
+                        tex.SetPixel(x, y, Color.clear);
+                    }
+                }
+            }
+
+            tex.filterMode = FilterMode.Bilinear;
+            tex.Apply();
+            _runtimeSprite = Sprite.Create(tex, new Rect(0, 0, size, size), new Vector2(0.5f, 0.5f), 8f);
+            return _runtimeSprite;
         }
     }
 }

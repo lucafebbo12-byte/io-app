@@ -24,7 +24,7 @@ namespace PaintGame
             TerritoryRenderer = GetComponentInChildren<TerritoryRenderer>(true);
             MatchManager      = GetComponentInChildren<MatchManager>(true);
             ScoreTracker      = GetComponentInChildren<ScoreTracker>(true);
-            PoolRegistry      = FindObjectOfType<PoolRegistry>();
+            PoolRegistry      = Object.FindFirstObjectByType<PoolRegistry>();
         }
 
         void OnDestroy()

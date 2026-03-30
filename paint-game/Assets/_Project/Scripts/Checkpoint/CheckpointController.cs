@@ -8,7 +8,12 @@ namespace PaintGame
     public class CheckpointController : MonoBehaviour
     {
         [Header("Config")]
-        public byte OwnerIndex { get; set; }
+        [SerializeField] private byte _ownerIndex = 1;
+        public byte OwnerIndex
+        {
+            get => _ownerIndex;
+            set => _ownerIndex = value;
+        }
 
         private int  _hp;
         private bool _alive = true;

@@ -18,6 +18,7 @@ namespace PaintGame
         public void Init(ScoreTracker tracker)
         {
             _tracker = tracker;
+            if (_rowParent == null || _rowPrefab == null) return;
             // Pre-create 6 rows
             for (int i = 0; i < GameConstants.TOTAL_PLAYERS; i++)
             {

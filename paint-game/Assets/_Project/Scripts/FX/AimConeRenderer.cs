@@ -15,6 +15,26 @@ namespace PaintGame
 
         private const int CONE_SEGMENTS = 12;
 
+        void Awake()
+        {
+            if (_mesh == null)
+            {
+                _mesh = new Mesh { name = "AimCone" };
+                GetComponent<MeshFilter>().mesh = _mesh;
+            }
+
+            if (_coneMaterial == null)
+            {
+                var shader = Shader.Find("Unlit/Color");
+                if (shader != null)
+                    _coneMaterial = new Material(shader);
+            }
+
+            var mr = GetComponent<MeshRenderer>();
+            if (mr != null && _coneMaterial != null)
+                mr.sharedMaterial = _coneMaterial;
+        }
+
         public void Init(PlayerStats stats, WeaponBase weapon)
         {
             _stats  = stats;
@@ -35,8 +55,8 @@ namespace PaintGame
         {
             float halfAngle = _weapon != null ? _weapon.Config.sprayHalfAngle
                                               : GameConstants.SPRAY_HALF_ANGLE_RAD;
-            float range     = _weapon != null ? _weapon.Config.sprayRange * 0.5f  // visual is half range
-                                              : GameConstants.SPRAY_RANGE * 0.5f;
+            float range     = _weapon != null ? _weapon.Config.sprayRange
+                                              : GameConstants.SPRAY_RANGE;
             float aimAngle  = _stats.AimAngle;
             Vector2 origin  = _stats.WorldPos;
 
